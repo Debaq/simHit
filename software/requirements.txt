@@ -1,0 +1,7 @@
+numpy
+pandas
+pyqtgraph
+pyserial
+PySide6
+Pillow
+scipy

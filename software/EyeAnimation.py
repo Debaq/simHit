@@ -1,6 +1,7 @@
 import numpy as np
 from PIL import Image
 import os
+from scipy.ndimage import rotate  # Importa la función de rotación de scipy
 
 class ImageSequence:
     def __init__(self, path_c_i, path_c_d):
@@ -13,7 +14,10 @@ class ImageSequence:
         for i in range(1, 15):
             img_path = os.path.join(path, f"{i:02d}.png")
             image = Image.open(img_path)
-            images.append(np.array(image))
+            np_image = np.array(image)
+            rotate_image = rotate(np_image, -90, reshape=False)
+            images.append(rotate_image)
+
         return np.array(images)
 
     def get(self, n):

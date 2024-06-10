@@ -4,10 +4,10 @@
 #include <Adafruit_Sensor.h>
 
 // Serial communication baud rate
-#define SERIAL_BAUD_RATE 115200
+#define SERIAL_BAUD_RATE 460800  // Configurar a una tasa de baudios más alta
 
 // Pins for LEDs and laser
-#define RED_LED_PIN 16 
+#define RED_LED_PIN 16
 #define BLUE_LED_PIN 14
 #define GREEN_LED_PIN 12
 #define LASER_PIN 13
@@ -31,11 +31,16 @@ Adafruit_BNO055 imuSensor = Adafruit_BNO055(55, BNO055_ADDRESS);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 bool start_imu = false;
+float x_offset = 0.0, y_offset = 0.0, z_offset = 0.0;
+
+const int threshold = 180;
+int prevAngleX = 0, prevAngleY = 0, prevAngleZ = 0;
+int offsetX = 0, offsetY = 0, offsetZ = 0;
 
 void setup() {
-  Serial.begin(SERIAL_BAUD_RATE);
+  Serial.begin(SERIAL_BAUD_RATE);  // Configurar a una tasa de baudios más alta
   delay(100);
-  
+
   Serial.println("SimHit configure");
 
   // Initialize LED pins
@@ -50,7 +55,13 @@ void setup() {
     Serial.println("No BNO055 detected");
     while (1);
   }
-  
+
+  // Configurar el modo de fusión de sensores
+  imuSensor.setMode(Adafruit_BNO055::OPERATION_MODE_NDOF);  // Modo de fusión de sensores con 9 grados de libertad
+
+  // Configurar el rango y la precisión del giroscopio
+  imuSensor.setExtCrystalUse(true);  // Usar cristal externo para mayor precisión
+
   // Initialize OLED display
   Serial.println("Initializing OLED display...");
   if (!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_ADDRESS)) {
@@ -91,21 +102,68 @@ void handleCommand(String command) {
       start_imu = false;
     } else if (command.endsWith("ON")) {
       start_imu = true;
+    } else if (command.endsWith("CAL")) {
+      calibrateIMU();
     }
   } else if (command.startsWith("O")) {
     String text = command.substring(1);
     displayText(text);
+  } else if (command.startsWith("BAR")) {
+    int percentage = command.substring(3).toInt();
+    drawProgressBar(percentage);
+  } else if (command == "HELLO") {
+    Serial.println("HELLO");
+  } else if (command == "RESET") {
+    Serial.println("Reiniciando...");
+    delay(10);
+    ESP.restart();  // Reiniciar el ESP12
   }
 }
 
 void IMU() {
   sensors_event_t event;
   imuSensor.getEvent(&event);
-  Serial.print(event.orientation.x);
+
+  // Leer datos del giroscopio
+  imu::Vector<3> gyro = imuSensor.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+
+  int currentAngleX = (int)event.orientation.x - x_offset;
+  int currentAngleY = (int)event.orientation.y - y_offset;
+  int currentAngleZ = (int)event.orientation.z - z_offset;
+
+  int adjustedAngleX = adjustDiscontinuity(currentAngleX, prevAngleX, offsetX);
+  int adjustedAngleY = adjustDiscontinuity(currentAngleY, prevAngleY, offsetY);
+  int adjustedAngleZ = adjustDiscontinuity(currentAngleZ, prevAngleZ, offsetZ);
+
+  prevAngleX = currentAngleX;
+  prevAngleY = currentAngleY;
+  prevAngleZ = currentAngleZ;
+
+  Serial.print(adjustedAngleX);
   Serial.print(";");
-  Serial.print(event.orientation.y);
+  Serial.print(adjustedAngleY);
   Serial.print(";");
-  Serial.println(event.orientation.z);
+  Serial.print(adjustedAngleZ);
+  Serial.print(";");
+  Serial.print(gyro.x());
+  Serial.print(";");
+  Serial.print(gyro.y());
+  Serial.print(";");
+  Serial.println(gyro.z());
+}
+
+int adjustDiscontinuity(int currentAngle, int prevAngle, int &offset) {
+  int adjustedAngle = currentAngle + offset;
+  int diff = currentAngle - prevAngle;
+  if (abs(diff) > threshold) {
+    if (diff > 0) {
+      offset -= 360;
+    } else {
+      offset += 360;
+    }
+    adjustedAngle = currentAngle + offset;
+  }
+  return adjustedAngle;
 }
 
 void displayText(String text) {
@@ -115,4 +173,37 @@ void displayText(String text) {
   display.setCursor(0, 0);
   display.println(text);
   display.display();
+}
+
+void drawProgressBar(int percentage) {
+  if (percentage < 0) percentage = 0;
+  if (percentage > 100) percentage = 100;
+
+  int barWidth = (SCREEN_WIDTH * percentage) / 100;
+
+  display.clearDisplay();
+  display.fillRect(0, 0, barWidth, SCREEN_HEIGHT, SSD1306_WHITE);
+  display.display();
+}
+
+void calibrateIMU() {
+  const int numSamples = 20;
+  float x_sum = 0.0, y_sum = 0.0, z_sum = 0.0;
+
+  Serial.println("Calibrating IMU...");
+
+  for (int i = 0; i < numSamples; i++) {
+    sensors_event_t event;
+    imuSensor.getEvent(&event);
+    x_sum += event.orientation.x;
+    y_sum += event.orientation.y;
+    z_sum += event.orientation.z;
+    delay(100);  // Pequeña espera entre lecturas
+  }
+
+  x_offset = x_sum / numSamples;
+  y_offset = y_sum / numSamples;
+  z_offset = z_sum / numSamples;
+
+  Serial.println("Calibration complete.");
 }
