@@ -182,9 +182,30 @@ void drawProgressBar(int percentage) {
   int barWidth = (SCREEN_WIDTH * percentage) / 100;
 
   display.clearDisplay();
+
+  // Dibujar la barra de progreso
   display.fillRect(0, 0, barWidth, SCREEN_HEIGHT, SSD1306_WHITE);
+
+  // Dibujar las líneas de 50% y 75%
+  int line50 = SCREEN_WIDTH / 2;
+  int line75 = (SCREEN_WIDTH * 75) / 100;
+
+  // Cambiar el color de las líneas cuando la barra las cruce
+  if (barWidth > line50) {
+    display.drawLine(line50, 0, line50, SCREEN_HEIGHT, SSD1306_BLACK);  // Línea apagada
+  } else {
+    display.drawLine(line50, 0, line50, SCREEN_HEIGHT, SSD1306_WHITE);  // Línea encendida
+  }
+
+  if (barWidth > line75) {
+    display.drawLine(line75, 0, line75, SCREEN_HEIGHT, SSD1306_BLACK);  // Línea apagada
+  } else {
+    display.drawLine(line75, 0, line75, SCREEN_HEIGHT, SSD1306_WHITE);  // Línea encendida
+  }
+
   display.display();
 }
+
 
 void calibrateIMU() {
   const int numSamples = 20;
