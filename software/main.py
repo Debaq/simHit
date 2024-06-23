@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QVBoxLayout
 from SerialHit import SerialConnection
 from TestNumber import TestNumber
 from ui import Ui_SimHit  # Importamos la UI generada
-from Hit import Stabilizer, smooth_curve
+from Hit import Stabilizer, smooth_curve, map_value
 from Transform import transform_scale
 from PySide6.QtGui import QIcon
 
@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
         self.head_data = []
 
         # Iniciar archivo de datos
-        self.init_data_file()
+        #self.init_data_file()
         self.configure_btn()
         self.cal = 0
 
@@ -169,6 +169,8 @@ class MainWindow(QMainWindow):
 
     def calibrate_init(self):
         if self.sender().text() == "Calibrar":
+            self.send_data("L13ON")
+
             self.send_data("IMUCAL")
             self.ui.btn_calibrate.setText("Detener medida")
         else:
@@ -177,8 +179,9 @@ class MainWindow(QMainWindow):
 
     def read_serial_data(self, data):
         if data == "Calibration complete.":
+            self.send_data("L13OFF")
             self.send_data("IMUON")
-            self.send_data("BAR050")
+            self.send_data("BAR000")
         data_list = self.verificar_y_convertir(data)
         if isinstance(data_list, list):
             self.head_data.append(data_list[0])
@@ -187,13 +190,37 @@ class MainWindow(QMainWindow):
             eye_H_compensate = self.head_data[-1] * gain
             self.eyeH_data.append(-eye_H_compensate)
             self.image_current = transform_scale(data_list[0])
-            print(data_list)
             self.detector_hit.update(data_list, elapsed_time)
-            if self.detector_hit.get_perturbation_data() is not None:
+            process = self.detector_hit.get_perturbation_data()
+            if process is not None and len(process[0]) > 10:
+              
+
+                
+                #optima >150 <300 :: 
+                #inferior <150
+                #superior >300
+
+                #print(len(process[0]))
                 x, y, dir_ = self.detector_hit.get_perturbation_data()
                 s_x, s_y = smooth_curve(x,y,100)
            
                 
+                pulse = max(process[1]) if dir_ == "izquierda" else min(process[1])
+
+                self.send_data(map_value(pulse))
+                if pulse < 150:
+                    self.send_data("L14OFF")
+                    
+                    self.send_data("L16ON")
+                else:
+                    self.send_data("L16OFF")
+
+                    self.send_data("L14ON")
+
+                self.ui.lbl_last_impulse.setText(pulse)
+                    
+
+
                 # Solo actualizar los datos si hay perturbación
                 if x and y:
                     if dir_== "derecha":

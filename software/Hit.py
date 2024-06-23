@@ -81,7 +81,6 @@ class Stabilizer:
         if self.is_recording_finished() and len(self.time) > 2:
             return self.time, self.angular_velocity, self.movement_direction
         else:
-            print(f"{self.recording_finished}:::{self.time}")
             return None
     
     def is_recording_finished(self):
@@ -152,3 +151,14 @@ def smooth_curve(x, y, num_points):
     y_new = cs(x_new)
 
     return x_new, y_new
+
+def map_value(value):
+    if value < 150:
+        mapped_value = np.interp(value, [0, 150], [0, 50])
+    elif value <= 300:
+        mapped_value = np.interp(value, [150, 300], [50, 75])
+    else:
+        mapped_value = np.interp(value, [300, 500], [75, 100])
+    
+    # Formatear el valor mapeado como string "BARXXX"
+    return f"BAR{int(mapped_value):03}"
