@@ -30,9 +30,9 @@ class ImageSequence:
         else:
             return self.c_d[n - 1]
 
-# Ejemplo de uso:
+#Ejemplo de uso:
 #sequence = ImageSequence('images/c_i', 'images/c_d')
 #img = sequence.get(-3)  # Obtiene la tercera imagen de c_i
 #print(img)
-# img = sequence.get(5)   # Obtiene la quinta imagen de c_d
-# img = sequence.get(0)   # Obtiene la imagen c_c (en negro)
+#img = sequence.get(5)   # Obtiene la quinta imagen de c_d
+#img = sequence.get(0)   # Obtiene la imagen c_c (en negro)

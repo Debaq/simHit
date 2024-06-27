@@ -1,19 +1,25 @@
 import numpy as np
+import statistics
 from scipy.interpolate import CubicSpline
 
 class Stabilizer:
-    def __init__(self, threshold, stabilization_time, post_perturbation_time=0.5):
+    def __init__(self, threshold, stabilization_time, post_perturbation_time=0.6):
+        """
+        threshold : umbral de movimiento que activa el registro en grados
+        """
         self.threshold = threshold
         self.stabilization_time = stabilization_time
         self.post_perturbation_time = post_perturbation_time
         self.reset()
 
     def reset(self):
+        print("me borre")
         self.previous_value = None
         self.previous_time = None
         self.perturbation_data = []
         self.time = []
         self.angular_velocity = []
+        self.horizontal_movement = []
         self.movement_direction = None
         self.stabilized = True
         self.stabilization_counter = 0
@@ -25,6 +31,7 @@ class Stabilizer:
         value_for_analysis = new_value[0]  # Posición 0 para análisis de comienzo del movimiento
         angular_velocity = new_value[5]    # Posición 5 es la aceleración
 
+        #se agrega primer valor para comenzar
         if self.previous_value is None or self.previous_time is None:
             self.previous_value = value_for_analysis
             self.previous_time = current_time
@@ -45,14 +52,7 @@ class Stabilizer:
             calibrated_time = current_time - self.perturbation_start_time
             self.time.append(calibrated_time)
             self.angular_velocity.append(angular_velocity)
-
-            # Determinar la dirección del movimiento
-            if value_for_analysis > 0:
-                self.movement_direction = 'derecha'
-            elif value_for_analysis < 0:
-                self.movement_direction = 'izquierda'
-            else:
-                self.movement_direction = 'neutral'
+            self.horizontal_movement.append(value_for_analysis)
 
             self.stabilized = False
             self.stabilization_counter = 0
@@ -77,8 +77,27 @@ class Stabilizer:
     def is_stabilized(self):
         return self.stabilized
 
+    def get_direction(self):
+        #print(f"aca aprte los {len(self.perturbation_data)} de: {self.perturbation_data}")
+        # Determinar la dirección del movimiento
+        if self.perturbation_data[-1][0]-self.perturbation_data[0][0] > 0:
+            self.movement_direction = 'derecha'
+        elif self.perturbation_data[-1][0]-self.perturbation_data[0][0] < 0:
+            self.movement_direction = 'izquierda'
+ 
+        
+    def verify_total_acc(self):
+        prom_acc = abs(statistics.mean(self.angular_velocity))
+        print(prom_acc)
+        if prom_acc > 30:
+            return True
+        else:
+            self.clear()
+            return False
+
     def get_perturbation_data(self):
-        if self.is_recording_finished() and len(self.time) > 2:
+        if self.is_recording_finished() and len(self.time) > 2 and self.verify_total_acc():
+            self.get_direction()
             return self.time, self.angular_velocity, self.movement_direction
         else:
             return None

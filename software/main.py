@@ -1,4 +1,3 @@
-# main.py
 import re
 import sys
 import time
@@ -9,19 +8,44 @@ import serial.tools.list_ports
 from EyeAnimation import ImageSequence
 from pyqtgraph import PlotWidget, plot
 from PySide6.QtCore import QElapsedTimer, Qt, QTimer
-from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QVBoxLayout, QDialog, QLineEdit, QPushButton, QMessageBox
 from SerialHit import SerialConnection
 from TestNumber import TestNumber
 from ui import Ui_SimHit  # Importamos la UI generada
 from Hit import Stabilizer, smooth_curve, map_value
 from Transform import transform_scale
 from PySide6.QtGui import QIcon
+import requests
+import random
+
 
 __VERSION__ = 0.1
 WINDOW_SIZE = 8000  # Tamaño de la ventana deslizante
 DATA_FILE = 'data.csv'  # Archivo para almacenar los datos
 
-gain = 0.9
+gain = 0.8
+
+class RutDialog(QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Ingresar RUT")
+        self.layout = QVBoxLayout(self)
+
+        self.label = QLabel("Ingrese su RUT:")
+        self.layout.addWidget(self.label)
+
+        self.rut_input = QLineEdit(self)
+        self.layout.addWidget(self.rut_input)
+
+        self.ok_button = QPushButton("OK", self)
+        self.ok_button.clicked.connect(self.accept)
+        self.layout.addWidget(self.ok_button)
+
+        self.rut = None
+
+    def accept(self):
+        self.rut = self.rut_input.text()
+        super().accept()
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -39,14 +63,18 @@ class MainWindow(QMainWindow):
         # Inicializar la conexión serial
         self.serial_connection = SerialConnection(baudrate=460800)
         self.serial_connection.data_received.connect(self.read_serial_data)
+        self.serial_connection.connection_failed.connect(self.retry_connection)
         self.serial_ports = self.serial_connection.find_ports()
 
         if self.serial_ports:
             self.serial_connection.start()
+            self.show_rut_dialog()
+        else:
+            self.retry_connection()
 
         self.timer_data_graph = QTimer()
         self.timer_data_graph.timeout.connect(self.update_graph)
-        self.timer_data_graph.start(50)  # Actualizar cada 50 ms
+        self.timer_data_graph.start(5)  # Actualizar cada 50 ms
 
         # Temporizador para medir el tiempo transcurrido
         self.elapsed_timer = QElapsedTimer()
@@ -58,6 +86,12 @@ class MainWindow(QMainWindow):
         self.eyeV_data = []
         self.headtime_data = []
         self.head_data = []
+        
+        # Almacenar datos de perturbaciones para graficar
+        self.rl_data_head = []
+        self.ll_data_head = []
+        self.rl_data_eye = []
+        self.ll_data_eye = []
 
         # Iniciar archivo de datos
         #self.init_data_file()
@@ -69,7 +103,41 @@ class MainWindow(QMainWindow):
         # Creamos el detector de Hit
         self.detector_hit = Stabilizer(0.1, 5)
     
-  
+    def retry_connection(self):
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Critical)
+        msg.setText("No se pudo conectar al puerto serial.")
+        msg.setInformativeText("¿Quieres reintentar?")
+        msg.setStandardButtons(QMessageBox.Retry | QMessageBox.Cancel)
+        ret = msg.exec()
+
+        if ret == QMessageBox.Retry:
+            self.serial_ports = self.serial_connection.find_ports()
+            if self.serial_ports:
+                self.serial_connection.start()
+                self.show_rut_dialog()
+            else:
+                self.retry_connection()
+        else:
+            sys.exit()
+
+    def request_user_name(self, rut):
+        url = "https://tmeduca.org/simhit/api.php"  # Asegúrate de usar la URL correcta
+        payload = {'rut': rut}
+        response = requests.post(url, data=payload)
+        if response.status_code == 200:
+            return response.json().get('name')
+        else:
+            return None
+
+    def show_rut_dialog(self):
+        dialog = RutDialog()
+        if dialog.exec() == QDialog.Accepted:
+            user_name = self.request_user_name(dialog.rut)
+            if user_name:
+                QMessageBox.information(self, "Usuario Conectado", f"Bienvenido, {user_name}")
+            else:
+                QMessageBox.critical(self, "Error", "No se pudo obtener el nombre del usuario")
 
     def configure_btn(self):
         self.ui.btn_calibrate.clicked.connect(self.calibrate_init)
@@ -123,6 +191,8 @@ class MainWindow(QMainWindow):
         self.rl_plot_data = self.rlgraph.plot(pen='r')
         self.ll_plot_data = self.llgraph.plot(pen='b')
 
+        
+
 
     def configure_eye(self):
         graphics_layout = pg.GraphicsLayoutWidget()
@@ -143,7 +213,6 @@ class MainWindow(QMainWindow):
         self.image_item.setImage(self.image_array.get(image_n))
 
     def update_graph(self):
-
         # Mantén solo los últimos WINDOW_SIZE puntos en memoria para la visualización
         if len(self.headtime_data) > WINDOW_SIZE:
             self.eyeH_data = self.eyeH_data[-WINDOW_SIZE:]
@@ -166,11 +235,18 @@ class MainWindow(QMainWindow):
             self.timeHead.setXRange(0, 10)
         
         self.update_image()
+    
 
+    def update_memory_graph(self):
+        for x, y in self.rl_data_head[:-1]:
+            self.rlgraph.plot(x, y, pen=pg.mkPen('w', width=1, style=Qt.DashLine))
+        for x, y in self.ll_data_head[:-1]:
+            self.llgraph.plot(x, y, pen=pg.mkPen('w', width=1, style=Qt.DashLine))
+       
+           
     def calibrate_init(self):
         if self.sender().text() == "Calibrar":
             self.send_data("L13ON")
-
             self.send_data("IMUCAL")
             self.ui.btn_calibrate.setText("Detener medida")
         else:
@@ -184,65 +260,72 @@ class MainWindow(QMainWindow):
             self.send_data("BAR000")
         data_list = self.verificar_y_convertir(data)
         if isinstance(data_list, list):
+            #print(data_list)
+            #graficar posicion de la cabeza y del ojo
             self.head_data.append(data_list[0])
             elapsed_time = self.elapsed_timer.elapsed() / 1000.0  # tiempo en segundos
             self.headtime_data.append(elapsed_time)
-            eye_H_compensate = self.head_data[-1] * gain
+            ganancia_variable = self.valor_con_error(gain, 10)            
+            eye_H_compensate = self.head_data[-1] * ganancia_variable
+
             self.eyeH_data.append(-eye_H_compensate)
             self.image_current = transform_scale(data_list[0])
+            
+            #detector de hits
             self.detector_hit.update(data_list, elapsed_time)
             process = self.detector_hit.get_perturbation_data()
-            if process is not None and len(process[0]) > 10:
-              
-
-                
-                #optima >150 <300 :: 
-                #inferior <150
-                #superior >300
-
-                #print(len(process[0]))
+            if process:
                 x, y, dir_ = self.detector_hit.get_perturbation_data()
-                s_x, s_y = smooth_curve(x,y,100)
-           
-                
-                pulse = max(process[1]) if dir_ == "izquierda" else min(process[1])
+                s_x, s_y = smooth_curve(x,y,200)
+                #pulse = max(process[1]) if dir_ == "izquierda" else min(process[1])
+                valores_absolutos = [abs(valor) for valor in process[1]]
 
-                self.send_data(map_value(pulse))
-                if pulse < 150:
+                pulse = max(valores_absolutos)
+
+                if pulse < 0:
+                    pulse = pulse*-1
+                if pulse < 150 and pulse > 0:
                     self.send_data("L14OFF")
-                    
                     self.send_data("L16ON")
-                else:
+                elif pulse > 150:
                     self.send_data("L16OFF")
-
                     self.send_data("L14ON")
+                self.send_data(map_value(pulse))#envia el valor a hit
 
-                self.ui.lbl_last_impulse.setText(pulse)
-                    
-
-
-                # Solo actualizar los datos si hay perturbación
+                self.ui.lbl_last_impulse.setText(str(pulse))
                 if x and y:
                     if dir_== "derecha":
                         self.rl_plot_data.setData(s_x, s_y)
-                    else:
-                        self.ll_plot_data.setData(s_x, s_y)
-                    #self.rl_plot_data.setData(s_x, s_y)
-                    #self.ll_plot_data.setData(x, y)
+                        self.rl_data_head.append((s_x,s_y))
+                        s_x_inv = [-s_x for x in s_x]
+                        s_y_inv = [-s_x for y in s_y]
+                        self.rl_data_eye.append((s_x_inv, s_y_inv))
 
+                        self.detector_hit.clear()
+
+                    elif dir_ == "izquierda":
+                        self.ll_plot_data.setData(s_x, s_y)
+                        self.ll_data_head.append((s_x,s_y))
+                        s_x_inv = [-s_x for x in s_x]
+                        s_y_inv = [-s_x for y in s_y]
+                        self.ll_data_eye.append((s_x_inv, s_y_inv))
+                        self.detector_hit.clear()
+          
+
+                    self.update_memory_graph()
                 
-                if self.detector_hit.is_recording_finished():
-                    self.detector_hit.clear()
+                self.rlgraph.setXRange(0, 0.6)
+                self.llgraph.setXRange(0, 0.6)
+                self.rlgraph.setYRange(400, -400)
+                self.llgraph.setYRange(400, -400)
+
 
     def verificar_y_convertir(self, data_string):
-        # Verificar si el string tiene el formato correcto usando una expresión regular
         pattern = re.compile(r'^-?\d+(\.\d+)?(;|-?\d+(\.\d+)?)*$')
         if not pattern.match(data_string):
             return None
         try:
-            # Dividir la cadena en una lista usando el delimitador ';'
             data_list = data_string.split(';')
-            # Convertir los elementos de la lista a números flotantes
             data_list = [float(i) for i in data_list]
             return data_list
         except ValueError:
@@ -260,13 +343,17 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def adjust_layouts(self):
-        # Ajustar altura del frame_btn_tools
         self.ui.frame_btn_tools.setMaximumHeight(40)
-
-        # Ajustar altura mínima del frame_results al 50% de la altura de la ventana
         screen_height = QApplication.primaryScreen().size().height()
         self.ui.frame_results.setMinimumHeight(screen_height * 0.30)
 
+    def valor_con_error(self, x, porcentaje):
+        # Calcular el porcentaje de error aleatorio
+        porcentaje_error = random.uniform(-porcentaje, porcentaje)
+        # Calcular el valor del error
+        error = x * porcentaje_error / 100
+        # Devolver el valor original más el error
+        return x + error
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

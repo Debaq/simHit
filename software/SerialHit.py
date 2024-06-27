@@ -3,9 +3,11 @@ import serial
 import serial.tools.list_ports
 from PySide6.QtCore import QThread, Signal
 import sys
+import time
 
 class SerialConnection(QThread):
     data_received = Signal(str)
+    connection_failed = Signal()
 
     def __init__(self, baudrate=115200, parent=None):
         super(SerialConnection, self).__init__(parent)
@@ -43,6 +45,10 @@ class SerialConnection(QThread):
         if not self.serial_ports:
             self.find_ports()
 
+        if not self.serial_ports:
+            self.connection_failed.emit()
+            return
+
         for port_name in self.serial_ports:
             try:
                 self.serial_port = serial.Serial(port_name, self.baudrate, timeout=1)
@@ -52,6 +58,7 @@ class SerialConnection(QThread):
                         self.data_received.emit(data)
             except serial.SerialException as e:
                 print(f"Error connecting to serial port: {e}")
+                self.connection_failed.emit()
 
     def stop(self):
         self.running = False
@@ -59,11 +66,10 @@ class SerialConnection(QThread):
             self.serial_port.close()
 
     def send_data(self, data):
-        print(data)
+        #print(data)
         if self.serial_port and self.serial_port.is_open:
             data = data + '\n'
             self.serial_port.write(data.encode())
             self.serial_port.flush()
         else:
             print("Serial port not open")
-
