@@ -1,34 +1,18 @@
 <script lang="ts">
   let { value = 0 }: { value?: number } = $props();
-  // value ∈ [-14, 14]
-  const max = 14;
-  let pct = $derived(value / max);
-  let pupilX = $derived(50 + pct * 28);
+  // value ∈ [-14, 14] → sprite index ∈ [0, 28]
+  const FRAMES = 29;
+  let idx = $derived(Math.max(0, Math.min(FRAMES - 1, Math.round(value) + 14)));
+  let posPct = $derived((idx / (FRAMES - 1)) * 100);
 </script>
 
 <div class="card eye-card">
   <div class="card-title">Ojo</div>
   <div class="eye-wrap">
-    <svg viewBox="0 0 100 100" class="eye">
-      <defs>
-        <radialGradient id="iris" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stop-color="#5b21b6" />
-          <stop offset="70%" stop-color="#7c3aed" />
-          <stop offset="100%" stop-color="#3730a3" />
-        </radialGradient>
-        <radialGradient id="sclera" cx="50%" cy="45%" r="60%">
-          <stop offset="0%" stop-color="#ffffff" />
-          <stop offset="100%" stop-color="#ede9fe" />
-        </radialGradient>
-      </defs>
-      <ellipse cx="50" cy="50" rx="45" ry="28" fill="url(#sclera)" stroke="var(--border-strong)" stroke-width="0.5" />
-      <circle cx={pupilX} cy="50" r="14" fill="url(#iris)" />
-      <circle cx={pupilX} cy="50" r="6" fill="#0f0a1f" />
-      <circle cx={pupilX - 3} cy="47" r="2" fill="white" opacity="0.85" />
-    </svg>
+    <div class="eye-frame" style:background-position-y="{posPct}%"></div>
     <div class="meta">
       <span>posición: <code>{value}</code></span>
-      <span>rango: <code>-14..14</code></span>
+      <span>frame: <code>{idx}</code></span>
     </div>
   </div>
 </div>
@@ -44,10 +28,18 @@
     padding: 16px;
     gap: 12px;
   }
-  .eye {
+  .eye-frame {
     width: 100%;
-    max-width: 360px;
-    aspect-ratio: 100 / 60;
+    max-width: 480px;
+    aspect-ratio: 400 / 240;
+    background-image: url('/eye/sprite.webp');
+    background-repeat: no-repeat;
+    background-size: 100% 2900%;
+    background-position-x: 0;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    image-rendering: auto;
   }
   .meta {
     display: flex; gap: 16px;
