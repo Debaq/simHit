@@ -1,10 +1,20 @@
 <script lang="ts">
-  let { gainLL = 0, gainRL = 0, impulsesLL = 0, impulsesRL = 0 }: {
-    gainLL?: number; gainRL?: number; impulsesLL?: number; impulsesRL?: number;
-  } = $props();
+  import { sim } from '$lib/simulator.svelte';
 
   const fmt = (n: number) => n.toFixed(2);
-  const gainColor = (g: number) => g >= 0.8 ? 'var(--success)' : g >= 0.6 ? 'var(--warn)' : 'var(--danger)';
+  const gainColor = (g: number) =>
+    g >= 0.8 ? 'var(--success)' : g >= 0.6 ? 'var(--warn)' : 'var(--danger)';
+
+  let gainLL = $derived(
+    sim.impulsesLL.length === 0
+      ? 0
+      : sim.impulsesLL.reduce((a, i) => a + i.gain, 0) / sim.impulsesLL.length
+  );
+  let gainRL = $derived(
+    sim.impulsesRL.length === 0
+      ? 0
+      : sim.impulsesRL.reduce((a, i) => a + i.gain, 0) / sim.impulsesRL.length
+  );
 </script>
 
 <div class="card results">
@@ -12,18 +22,28 @@
   <div class="card-body grid">
     <div class="metric">
       <div class="m-label">Ganancia LL</div>
-      <div class="m-value" style:color={gainColor(gainLL)}>{fmt(gainLL)}</div>
-      <div class="m-sub">{impulsesLL} impulsos</div>
+      <div class="m-value" style:color={gainColor(gainLL)}>
+        {sim.impulsesLL.length ? fmt(gainLL) : '—'}
+      </div>
+      <div class="m-sub">{sim.impulsesLL.length} impulsos</div>
     </div>
     <div class="metric">
       <div class="m-label">Ganancia RL</div>
-      <div class="m-value" style:color={gainColor(gainRL)}>{fmt(gainRL)}</div>
-      <div class="m-sub">{impulsesRL} impulsos</div>
+      <div class="m-value" style:color={gainColor(gainRL)}>
+        {sim.impulsesRL.length ? fmt(gainRL) : '—'}
+      </div>
+      <div class="m-sub">{sim.impulsesRL.length} impulsos</div>
     </div>
     <div class="actions">
-      <button class="primary">Iniciar test</button>
-      <button>Limpiar</button>
-      <button>Exportar</button>
+      <button
+        class="primary"
+        disabled={!sim.connected}
+        onclick={() => (sim.running ? sim.stopRunning() : sim.startRunning())}
+      >
+        {sim.running ? '■ Detener' : '▶ Iniciar test'}
+      </button>
+      <button onclick={() => sim.clearImpulses()}>Limpiar</button>
+      <button disabled>Exportar</button>
     </div>
   </div>
 </div>
@@ -50,4 +70,5 @@
     display: flex; gap: 8px;
     justify-content: center;
   }
+  button:disabled { opacity: .4; cursor: not-allowed; }
 </style>

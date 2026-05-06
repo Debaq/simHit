@@ -1,39 +1,124 @@
 <script lang="ts">
-  let { title = 'Trazado' }: { title?: string } = $props();
+  import { onMount } from 'svelte';
+  import uPlot from 'uplot';
+  import 'uplot/dist/uPlot.min.css';
+  import { sim } from '$lib/simulator.svelte';
+
+  let { title = 'Tiempo real' }: { title?: string } = $props();
+  let host: HTMLDivElement;
+  let container: HTMLDivElement;
+  let plot: uPlot | undefined;
+  let raf = 0;
+
+  onMount(() => {
+    const css = getComputedStyle(document.documentElement);
+    const head = css.getPropertyValue('--head-color').trim() || '#7c3aed';
+    const eye = css.getPropertyValue('--eye-color').trim() || '#f59e0b';
+    const grid = css.getPropertyValue('--grid').trim() || '#ede9fe';
+    const muted = css.getPropertyValue('--text-muted').trim() || '#64748b';
+
+    const r = host.getBoundingClientRect();
+    const opts: uPlot.Options = {
+      width: Math.max(200, Math.floor(r.width)),
+      height: Math.max(120, Math.floor(r.height)),
+      padding: [8, 12, 0, 0],
+      scales: {
+        x: { time: false },
+        y: { range: [-260, 260] },
+      },
+      axes: [
+        {
+          stroke: muted,
+          grid: { stroke: grid, width: 1 },
+          ticks: { stroke: grid },
+          values: (_, vals) => vals.map((v) => v.toFixed(1) + 's'),
+        },
+        {
+          stroke: muted,
+          grid: { stroke: grid, width: 1 },
+          ticks: { stroke: grid },
+          label: '°/s',
+          labelSize: 24,
+        },
+      ],
+      series: [
+        {},
+        { label: 'cabeza', stroke: head, width: 1.5 },
+        { label: 'ojo', stroke: eye, width: 1.5 },
+      ],
+      cursor: { drag: { x: false, y: false }, points: { show: false } },
+      legend: { show: false },
+    };
+
+    plot = new uPlot(
+      opts,
+      [sim.tBuf, sim.headBuf, sim.eyeBuf] as unknown as uPlot.AlignedData,
+      container
+    );
+
+    const tick = () => {
+      if (plot && sim.connected) {
+        plot.setData(
+          [sim.tBuf, sim.headBuf, sim.eyeBuf] as unknown as uPlot.AlignedData,
+          true
+        );
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+
+    const ro = new ResizeObserver(() => {
+      if (!plot || !host) return;
+      const r2 = host.getBoundingClientRect();
+      plot.setSize({
+        width: Math.max(200, Math.floor(r2.width)),
+        height: Math.max(120, Math.floor(r2.height)),
+      });
+    });
+    ro.observe(host);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      plot?.destroy();
+    };
+  });
 </script>
 
 <div class="card chart">
-  <div class="card-title">{title}</div>
-  <div class="card-body chart-area">
-    <svg viewBox="0 0 600 220" preserveAspectRatio="none" class="plot">
-      <!-- grid -->
-      {#each [0,1,2,3,4] as i}
-        <line x1="0" x2="600" y1={i*55} y2={i*55} stroke="var(--grid)" stroke-width="1" />
-      {/each}
-      {#each [0,1,2,3,4,5,6] as i}
-        <line y1="0" y2="220" x1={i*100} x2={i*100} stroke="var(--grid)" stroke-width="1" />
-      {/each}
-      <!-- baseline -->
-      <line x1="0" x2="600" y1="110" y2="110" stroke="var(--border-strong)" stroke-width="1" stroke-dasharray="2 4" />
-      <!-- placeholder traces -->
-      <path d="M0,110 Q150,30 300,110 T600,110" fill="none" stroke="var(--head-color)" stroke-width="2" opacity="0.85" />
-      <path d="M0,110 Q150,50 300,110 T600,110" fill="none" stroke="var(--eye-color)" stroke-width="2" opacity="0.85" />
-    </svg>
-    <div class="legend">
+  <div class="card-title">
+    {title}
+    <span class="legend">
       <span><i style:background="var(--head-color)"></i>Cabeza</span>
       <span><i style:background="var(--eye-color)"></i>Ojo</span>
-    </div>
+    </span>
+  </div>
+  <div bind:this={host} class="plot-host">
+    <div bind:this={container} class="plot-inner"></div>
   </div>
 </div>
 
 <style>
-  .chart { display: flex; flex-direction: column; }
-  .chart-area { flex: 1; display: flex; flex-direction: column; gap: 6px; }
-  .plot { width: 100%; height: 100%; min-height: 160px; }
-  .legend {
-    display: flex; gap: 16px; padding: 4px 4px 0;
-    font-size: 12px; color: var(--text-muted);
+  .chart { display: flex; flex-direction: column; min-height: 0; flex: 1; height: 100%; }
+  .card-title {
+    display: flex; justify-content: space-between; align-items: center;
   }
-  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .plot-host {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .plot-inner {
+    position: absolute;
+    inset: 0;
+  }
+  .legend {
+    display: flex; gap: 12px; font-size: 11px;
+    text-transform: none; letter-spacing: 0;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
   .legend i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+  :global(.uplot) { font-family: inherit; }
+  :global(.uplot .u-legend) { display: none; }
 </style>

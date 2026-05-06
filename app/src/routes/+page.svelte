@@ -1,11 +1,16 @@
 <script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
   import TopBar from '$lib/components/TopBar.svelte';
   import EyeView from '$lib/components/EyeView.svelte';
   import TraceChart from '$lib/components/TraceChart.svelte';
   import ImpulseChart from '$lib/components/ImpulseChart.svelte';
   import ResultsPanel from '$lib/components/ResultsPanel.svelte';
+  import { sim } from '$lib/simulator.svelte';
 
-  let eyeValue = $state(0);
+  onMount(() => {
+    sim.connect();
+  });
+  onDestroy(() => sim.disconnect());
 </script>
 
 <div class="app">
@@ -13,14 +18,23 @@
 
   <main class="layout">
     <section class="row top">
-      <div class="trace"><TraceChart title="Velocidad cabeza vs ojo (tiempo real)" /></div>
+      <div class="trace">
+        <TraceChart title="Velocidad cabeza vs ojo (tiempo real)" />
+      </div>
       <div class="eye">
-        <EyeView value={eyeValue} />
-        <input
-          type="range" min="-14" max="14" step="1"
-          bind:value={eyeValue}
-          aria-label="Posición del ojo (debug)"
-        />
+        <EyeView value={sim.gaze} blinkFrame={sim.blinkFrame} connected={sim.connected} />
+        <div class="eye-controls">
+          <button
+            class:primary={sim.connected && sim.running}
+            disabled={!sim.connected}
+            onclick={() => (sim.running ? sim.stopRunning() : sim.startRunning())}
+          >
+            {sim.running ? '■ Detener simulación' : '▶ Simular impulsos'}
+          </button>
+          <button onclick={() => (sim.connected ? sim.disconnect() : sim.connect())}>
+            {sim.connected ? 'Desconectar' : 'Conectar'}
+          </button>
+        </div>
       </div>
     </section>
 
@@ -55,13 +69,18 @@
   .row.top {
     grid-template-columns: 2fr 1fr;
     flex: 1.3;
+    min-height: 0;
   }
   .row.bottom {
     grid-template-columns: 1fr 1fr 1fr;
     flex: 1;
+    min-height: 0;
   }
   .trace, .eye { display: flex; flex-direction: column; min-height: 0; }
   .eye { gap: 8px; }
   .eye :global(.eye-card) { flex: 1; }
-  input[type="range"] { width: 100%; accent-color: var(--primary); }
+  .eye-controls {
+    display: flex; gap: 8px;
+  }
+  .eye-controls button { flex: 1; }
 </style>
