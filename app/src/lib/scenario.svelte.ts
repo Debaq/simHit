@@ -1,4 +1,8 @@
 import type { Node, Edge } from '@xyflow/svelte';
+import { storage } from './storage';
+
+const SCENARIOS_DIR = 'scenarios';
+const LEGACY_KEY = 'simhit:scenarios';
 
 export type NodeKind = 'start' | 'impulse' | 'pause' | 'artifact' | 'end' | 'random';
 
@@ -32,7 +36,6 @@ export type Scenario = {
   updated: number;
 };
 
-const KEY = 'simhit:scenarios';
 const ACTIVE_KEY = 'simhit:active-scenario';
 
 export function defaultsFor(kind: NodeKind): AnyData {
@@ -66,25 +69,42 @@ class ScenarioStore {
   );
   isExampleActive = $derived(!!this.examples.find((s) => s.id === this.activeId));
 
-  load() {
+  loaded = $state(false);
+
+  async load() {
     this.examples = buildExampleCases();
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) this.list = JSON.parse(raw);
-      this.activeId = localStorage.getItem(ACTIVE_KEY);
-      if (!this.activeId) this.activeId = this.examples[0]?.id ?? this.list[0]?.id ?? null;
-    } catch (e) {
-      console.warn('No se pudieron cargar escenarios', e);
+
+    // Migración legacy → fs (una sola vez si fs vacío)
+    const filenames = await storage.list(SCENARIOS_DIR);
+    if (filenames.length === 0) {
+      const legacy = localStorage.getItem(LEGACY_KEY);
+      if (legacy) {
+        try {
+          const arr: Scenario[] = JSON.parse(legacy);
+          for (const s of arr) {
+            await storage.writeJson(`${SCENARIOS_DIR}/${s.id}.json`, s);
+          }
+          localStorage.removeItem(LEGACY_KEY);
+        } catch (e) { console.warn('migración escenarios', e); }
+      }
     }
+
+    const items: Scenario[] = [];
+    for (const fn of (await storage.list(SCENARIOS_DIR)).filter((n) => n.endsWith('.json'))) {
+      const s = await storage.readJson<Scenario>(`${SCENARIOS_DIR}/${fn}`);
+      if (s) items.push(s);
+    }
+    this.list = items.sort((a, b) => b.updated - a.updated);
+
+    try {
+      this.activeId = localStorage.getItem(ACTIVE_KEY);
+    } catch {}
+    if (!this.activeId) this.activeId = this.examples[0]?.id ?? this.list[0]?.id ?? null;
+    this.loaded = true;
   }
 
-  save() {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(this.list));
-      if (this.activeId) localStorage.setItem(ACTIVE_KEY, this.activeId);
-    } catch (e) {
-      console.warn('No se pudo guardar', e);
-    }
+  private persist(s: Scenario) {
+    void storage.writeJson(`${SCENARIOS_DIR}/${s.id}.json`, s);
   }
 
   create(name = 'Nuevo escenario'): Scenario {
@@ -101,7 +121,8 @@ class ScenarioStore {
     };
     this.list = [s, ...this.list];
     this.activeId = id;
-    this.save();
+    try { localStorage.setItem(ACTIVE_KEY, id); } catch {}
+    this.persist(s);
     return s;
   }
 
@@ -118,19 +139,21 @@ class ScenarioStore {
     };
     this.list = [copy, ...this.list];
     this.activeId = copy.id;
-    this.save();
+    try { localStorage.setItem(ACTIVE_KEY, copy.id); } catch {}
+    this.persist(copy);
     return copy;
   }
 
   remove(id: string) {
     this.list = this.list.filter((s) => s.id !== id);
     if (this.activeId === id) this.activeId = this.list[0]?.id ?? this.examples[0]?.id ?? null;
-    this.save();
+    void storage.remove(`${SCENARIOS_DIR}/${id}.json`);
+    if (this.activeId) try { localStorage.setItem(ACTIVE_KEY, this.activeId); } catch {}
   }
 
   rename(id: string, name: string) {
     const s = this.list.find((x) => x.id === id);
-    if (s) { s.name = name; s.updated = Date.now(); this.save(); }
+    if (s) { s.name = name; s.updated = Date.now(); this.persist(s); this.list = [...this.list]; }
   }
 
   setActive(id: string) {
@@ -139,13 +162,12 @@ class ScenarioStore {
   }
 
   updateActive(nodes: Node[], edges: Edge[]) {
-    // Sólo guarda si el activo es del usuario (no example)
     const s = this.list.find((x) => x.id === this.activeId);
     if (!s) return;
     s.nodes = nodes;
     s.edges = edges;
     s.updated = Date.now();
-    this.save();
+    this.persist(s);
   }
 }
 

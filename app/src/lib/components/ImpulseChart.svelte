@@ -14,6 +14,7 @@
 
   // signo: leftward (LL) lo invertimos para que pico apunte hacia arriba (convención vHIT)
   let flip = $derived(side === 'LL' ? -1 : 1);
+  let sideColor = $derived(side === 'LL' ? 'var(--side-ll)' : 'var(--side-rl)');
 
   let impulses = $derived(side === 'LL' ? sim.impulsesLL : sim.impulsesRL);
 
@@ -35,10 +36,14 @@
   }
 </script>
 
-<div class="card impulse">
+<div class="card impulse" style:--side={sideColor}>
   <div class="card-title">
     <span class="side-tag">{side}</span> {label}
     <span class="count">{impulses.length}</span>
+    <span class="legend">
+      <span><i class="solid"></i>cabeza</span>
+      <span><i class="dashed"></i>ojo</span>
+    </span>
   </div>
   <div class="card-body">
     <svg viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" class="plot">
@@ -57,8 +62,8 @@
       {/each}
 
       {#each impulses as imp (imp.id)}
-        <path d={pathFor(imp.t, imp.head, flip)} fill="none" stroke="var(--head-color)" stroke-width="1.2" opacity="0.6" />
-        <path d={pathFor(imp.t, imp.eye, flip)} fill="none" stroke="var(--eye-color)" stroke-width="1.2" opacity="0.7" />
+        <path d={pathFor(imp.t, imp.head, flip)} fill="none" stroke={sideColor} stroke-width="1.6" opacity="0.55" />
+        <path d={pathFor(imp.t, imp.eye, flip)} fill="none" stroke={sideColor} stroke-width="1.2" opacity="0.7" stroke-dasharray="3 2" />
       {/each}
 
       {#if impulses.length === 0}
@@ -73,9 +78,10 @@
   .card-title { display: flex; align-items: center; justify-content: space-between; }
   .card-body { padding: 8px 6px; flex: 1; }
   .plot { width: 100%; height: 100%; min-height: 140px; display: block; }
+  .impulse { border-top: 3px solid var(--side); }
   .side-tag {
     display: inline-block;
-    background: var(--primary);
+    background: var(--side);
     color: white;
     padding: 1px 6px;
     border-radius: 4px;
@@ -83,11 +89,20 @@
     margin-right: 6px;
   }
   .count {
-    background: var(--primary-soft);
-    color: var(--primary);
+    background: var(--side);
+    color: white;
     padding: 2px 8px;
     border-radius: 999px;
     font-size: 11px;
     font-weight: 600;
+    opacity: 0.9;
   }
+  .card-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .legend { display: inline-flex; gap: 8px; margin-left: auto; font-size: 10px; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .legend i {
+    width: 14px; height: 0; border-top: 2px solid var(--side);
+    display: inline-block;
+  }
+  .legend i.dashed { border-top-style: dashed; }
 </style>

@@ -24,12 +24,10 @@
         <TraceChart title="Velocidad cabeza vs ojo (tiempo real)" />
       </div>
       <div class="eye">
-        <EyeView value={sim.gaze} blinkFrame={sim.blinkFrame} connected={sim.connected} />
-        <div class="eye-controls">
-          <button onclick={() => (sim.connected ? sim.disconnect() : sim.connect())}>
-            {sim.connected ? 'Desconectar' : 'Conectar'}
-          </button>
-        </div>
+        <EyeView value={sim.gaze} blinkFrame={sim.blinkFrame} connected={sim.cameraOn} />
+        {#if !sim.cameraOn}
+          <div class="hint-cam">Encendé la cámara desde la barra superior para visualizar el ojo.</div>
+        {/if}
       </div>
     </section>
 
@@ -74,8 +72,11 @@
   .trace, .eye { display: flex; flex-direction: column; min-height: 0; }
   .eye { gap: 8px; }
   .eye :global(.eye-card) { flex: 1; }
-  .eye-controls {
-    display: flex; gap: 8px;
+  .hint-cam {
+    text-align: center; font-size: 11px;
+    color: var(--text-muted); padding: 8px;
+    background: var(--surface-2);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-sm);
   }
-  .eye-controls button { flex: 1; }
 </style>

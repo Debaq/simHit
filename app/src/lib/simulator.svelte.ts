@@ -30,6 +30,7 @@ const OVERT_OFFSET = 240;
 
 class Simulator {
   connected = $state(false);
+  cameraOn = $state(false);
   mode = $state<'idle' | 'free' | 'scenario'>('idle');
   currentScenarioName = $state<string | null>(null);
   currentStep = $state<string | null>(null);
@@ -73,10 +74,7 @@ class Simulator {
   connect() {
     if (this.connected) return;
     this.connected = true;
-    this.startMs = performance.now();
-    this.tBuf.fill(0);
-    this.headBuf.fill(0);
-    this.eyeBuf.fill(0);
+    this.resetBuffers();
     this.interval = setInterval(() => this.tick(), 1000 / FS);
     this.scheduleBlink();
   }
@@ -94,6 +92,7 @@ class Simulator {
   startFreeMode() {
     if (!this.connected) return;
     this.stop();
+    this.resetBuffers();
     this.mode = 'free';
     this.currentScenarioName = 'Modo libre (random)';
     this.cancelToken++;
@@ -103,6 +102,7 @@ class Simulator {
   async runScenario(scenario: Scenario) {
     if (!this.connected) return;
     this.stop();
+    this.resetBuffers();
     this.mode = 'scenario';
     this.currentScenarioName = scenario.name;
     const token = ++this.cancelToken;
@@ -195,7 +195,20 @@ class Simulator {
     }
   }
 
+  private resetBuffers() {
+    // Pre-poblar el eje de tiempo con la ventana hacia atrás para que
+    // el chart muestre una línea base plana (sin colapsar el rango X).
+    for (let i = 0; i < N; i++) this.tBuf[i] = (i - N + 1) / FS;
+    this.headBuf.fill(0);
+    this.eyeBuf.fill(0);
+    this.startMs = performance.now();
+    this.rev++;
+  }
+
   private tick() {
+    // En idle no acumulamos datos en el buffer.
+    if (this.mode === 'idle' && !this.impCfg) return;
+
     const now = performance.now();
     const tSec = (now - this.startMs) / 1000;
 

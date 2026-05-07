@@ -129,6 +129,7 @@
 
   <div class="docente">
     <aside class="left">
+      <a class="ext-link" href="/docente/camara">📷 Editor de cámara →</a>
       <div class="section-title">Casos predefinidos</div>
       <ul>
         {#each scenarios.examples as s (s.id)}
@@ -240,6 +241,16 @@
   .left .dup { padding: 4px 8px; background: transparent; border: none; color: var(--text-muted); font-size: 14px; }
   .left .dup:hover { color: var(--primary); background: transparent; }
   .left .empty-li { padding: 6px 8px; font-size: 11px; color: var(--text-muted); font-style: italic; text-align: center; }
+  .ext-link {
+    display: block; padding: 8px 10px;
+    background: var(--accent-soft); color: var(--accent);
+    border-radius: var(--radius-sm); text-decoration: none;
+    font-size: 12px; font-weight: 600;
+    border: 1px solid var(--accent);
+    text-align: center;
+    transition: background .15s;
+  }
+  .ext-link:hover { background: var(--accent); color: white; }
   .empty { padding: 40px; text-align: center; color: var(--text-muted); }
   .divider { border-top: 1px solid var(--border); margin: 4px 0; }
 

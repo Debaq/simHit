@@ -5,6 +5,33 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "opener:default"
+    "opener:default",
+    "serialplugin:default",
+    "serialplugin:allow-available-ports",
+    "serialplugin:allow-open",
+    "serialplugin:allow-close",
+    "serialplugin:allow-read",
+    "serialplugin:allow-start-listening",
+    "serialplugin:allow-stop-listening",
+    "serialplugin:allow-write",
+    "fs:default",
+    "fs:allow-app-read-recursive",
+    "fs:allow-app-write-recursive",
+    "fs:allow-app-meta-recursive",
+    "fs:allow-mkdir",
+    "fs:allow-read-dir",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-remove",
+    "fs:allow-exists",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$APPDATA" }
+      ]
+    }
   ]
 }
