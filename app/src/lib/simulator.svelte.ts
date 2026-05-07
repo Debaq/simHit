@@ -1,5 +1,6 @@
-import type { Scenario } from '$lib/scenario.svelte';
-import type { Node } from '@xyflow/svelte';
+import type { Scenario, ArtifactConfig, Channel, ChannelConfig } from '$lib/scenario.svelte';
+import { eyeset } from '$lib/eyeset.svelte';
+import { serial } from '$lib/serial.svelte';
 
 export type Impulse = {
   id: number;
@@ -42,6 +43,13 @@ const SACCADE_SIGMA = 16;
 const COVERT_OFFSET = 95;     // ms desde inicio del impulso
 const OVERT_OFFSET = 240;
 
+// Detección de impulso real desde sensor (°/s)
+const IMPULSE_START_THR = 50;
+const IMPULSE_END_THR = 20;
+const IMPULSE_END_HOLD_MS = 60;
+const MIN_IMPULSE_MS = 60;
+const MAX_IMPULSE_MS = 600;
+
 class Simulator {
   connected = $state(false);
   cameraOn = $state(false);
@@ -75,6 +83,12 @@ class Simulator {
   private nextImpulseMs = 0;
   private impulseId = 1;
   private cancelToken = 0;
+  private activeScenario: Scenario | null = null;
+  private belowSinceMs: number | null = null;
+
+  // Estado suavizado para el plot (decoupling del batching del serial USB).
+  // Crudo se mantiene para detección de impulso; este valor se almacena al headBuf.
+  private smoothedHead = 0;
 
   // configuración del impulso activo
   private impCfg: {
@@ -121,60 +135,44 @@ class Simulator {
     this.scheduleNextRandom();
   }
 
+  /**
+   * Activa un "paciente virtual": la dirección del impulso (manual o desde
+   * firmware) selecciona el canal correspondiente y aplica su config. Mock
+   * actual: dispara impulsos random L/R hasta stop, leyendo LL/RL del escenario.
+   * Cuando llegue firmware real, el trigger será el movimiento de cabeza.
+   */
   async runScenario(scenario: Scenario) {
     if (!this.connected) return;
     this.stop();
     this.resetBuffers();
     this.mode = 'scenario';
     this.currentScenarioName = scenario.name;
+    this.activeScenario = scenario;
     const token = ++this.cancelToken;
 
-    const start = scenario.nodes.find((n) => n.type === 'start');
-    if (!start) { this.stop(); return; }
-
-    let pendingArtifact: { artifact: ImpulseTrigger['artifact']; probability: number } | null = null;
-    let current: Node | undefined = start;
-
-    while (current && current.type !== 'end' && token === this.cancelToken) {
-      const data = current.data as any;
-      this.currentStep = data.label ?? current.type;
-
-      if (current.type === 'impulse') {
-        for (let i = 0; i < (data.count ?? 1) && token === this.cancelToken; i++) {
-          const useArt = pendingArtifact && Math.random() < pendingArtifact.probability;
-          this.triggerImpulse({
-            side: data.side,
-            gain: data.gain,
-            peakVel: data.peakVel,
-            saccade: data.saccade,
-            artifact: useArt ? pendingArtifact!.artifact : null,
-          });
-          // espera impulso + intervalo realista 1.8–3s
-          await this.delay(IMP_DURATION_MS + 1500 + Math.random() * 1500, token);
-          if (useArt) pendingArtifact = null;
-        }
-      } else if (current.type === 'pause') {
-        await this.delay(data.durationMs ?? 1000, token);
-      } else if (current.type === 'artifact') {
-        pendingArtifact = { artifact: data.artifact, probability: data.probability };
-      } else if (current.type === 'random') {
-        const out = scenario.edges.filter((e) => e.source === current!.id);
-        if (out.length === 0) break;
-        const chosen = out[Math.floor(Math.random() * out.length)];
-        current = scenario.nodes.find((n) => n.id === chosen.target);
-        continue;
-      }
-
-      const out = scenario.edges.filter((e) => e.source === current!.id);
-      if (out.length === 0) break;
-      current = scenario.nodes.find((n) => n.id === out[0].target);
+    if (serial.connected) {
+      // Sensor real: la detección se hace en tick() por umbral de velocidad.
+      this.currentStep = 'Esperando movimiento de cabeza';
+      return;
     }
 
-    if (token === this.cancelToken) {
-      this.mode = 'idle';
-      this.currentStep = null;
+    // Sin sensor: scheduler random como mock.
+    this.currentStep = 'Paciente activo (sin sensor)';
+    while (token === this.cancelToken) {
+      const side: 'L' | 'R' = Math.random() < 0.5 ? 'L' : 'R';
+      const channel: Channel = side === 'L' ? 'LL' : 'RL';
+      const cfg = scenario.channels[channel];
+      this.triggerImpulse({
+        side,
+        gain: cfg.gain,
+        peakVel: cfg.peakVel,
+        saccade: cfg.saccade,
+        artifact: rollArtifact(resolveArtifacts(cfg)),
+      });
+      await this.delay(IMP_DURATION_MS + 1500 + Math.random() * 1500, token);
     }
   }
+
 
   stop() {
     this.cancelToken++;
@@ -183,6 +181,8 @@ class Simulator {
     this.gaze = 0;
     if (this.capturing) this.commitImpulse();
     this.impCfg = null;
+    this.activeScenario = null;
+    this.belowSinceMs = null;
   }
 
   clearImpulses() {
@@ -228,8 +228,18 @@ class Simulator {
   }
 
   private tick() {
-    // En idle no acumulamos datos en el buffer.
-    if (this.mode === 'idle' && !this.impCfg) return;
+    // En idle: si hay sensor, igual reflejamos pose en vivo (para calibrar ejes
+    // visualmente) sin acumular datos en el buffer ni detectar impulsos.
+    if (this.mode === 'idle' && !this.impCfg) {
+      if (serial.connected) {
+        this.headYaw = serial.poseYaw;
+        this.headPitch = serial.posePitch;
+        this.headRoll = serial.poseRoll;
+      }
+      return;
+    }
+
+    if (serial.connected) { this.tickWithSensor(); return; }
 
     const now = performance.now();
     const tSec = (now - this.startMs) / 1000;
@@ -341,6 +351,143 @@ class Simulator {
     this.rev++;
   }
 
+  private tickWithSensor() {
+    const now = performance.now();
+    const tSec = (now - this.startMs) / 1000;
+
+    // Pose desde sensor (configurable por axes)
+    this.headYaw = serial.poseYaw;
+    this.headPitch = serial.posePitch;
+    this.headRoll = serial.poseRoll;
+
+    // Drenar todas las muestras gyro acumuladas desde el último tick. Evita
+    // pérdidas/duplicados por bursts USB y jitter del setInterval.
+    const samples = serial.drainGyroYaw();
+
+    // Suavizado con dt fijo (1/FS) por muestra. τ=50ms.
+    const SMOOTH_TAU_MS = 50;
+    const SMOOTH_ALPHA = 1 - Math.exp(-(1000 / FS) / SMOOTH_TAU_MS);
+    const SAMPLE_DT_MS = 1000 / FS;
+
+    let eye = (Math.random() - 0.5) * 3;
+    let lastEyeSig = 0;
+    const N_S = samples.length;
+    const smoothHistory = new Array<number>(N_S);
+    const eyeHistory = new Array<number>(N_S);
+
+    for (let i = 0; i < N_S; i++) {
+      const head = samples[i];
+      // Timestamp aproximado de esta muestra (asume cadencia uniforme 1/FS)
+      const sampleNow = now - (N_S - 1 - i) * SAMPLE_DT_MS;
+      this.smoothedHead += (head - this.smoothedHead) * SMOOTH_ALPHA;
+      smoothHistory[i] = this.smoothedHead;
+
+      // Inicio de impulso (solo en escenario)
+      if (this.mode === 'scenario' && !this.impCfg && Math.abs(head) > IMPULSE_START_THR) {
+        const dir = head > 0 ? 1 : -1;
+        const channel: Channel = dir < 0 ? 'LL' : 'RL';
+        const cfg = this.activeScenario?.channels[channel];
+        if (cfg) {
+          const artifact = rollArtifact(resolveArtifacts(cfg));
+          this.impCfg = {
+            startMs: sampleNow,
+            dir,
+            peak: Math.abs(head),
+            gain: cfg.gain,
+            saccade: cfg.saccade,
+            artifact,
+          };
+          this.capturing = { side: channel, t: [], head: [], eye: [] };
+          if (artifact === 'blink') {
+            setTimeout(() => this.runBlink(), 80 + Math.random() * 80);
+          }
+        }
+      }
+
+      if (this.impCfg && this.capturing) {
+        const cfg = this.impCfg;
+        cfg.peak = Math.max(cfg.peak, Math.abs(head));
+        const elapsed = sampleNow - cfg.startMs;
+
+        let eyeSig = -cfg.dir * Math.abs(this.smoothedHead) * cfg.gain;
+        if (cfg.artifact === 'wrong_dir') eyeSig = -eyeSig;
+        if (cfg.artifact === 'overshoot') eyeSig *= 1.4;
+        if (cfg.artifact === 'fixation_loss') eyeSig += (Math.random() - 0.5) * 60;
+
+        if (cfg.saccade === 'covert') {
+          const sdt = elapsed - COVERT_OFFSET;
+          const sBell = Math.exp(-(sdt * sdt) / (2 * SACCADE_SIGMA * SACCADE_SIGMA));
+          const sAmp = cfg.peak * (1 - cfg.gain) * 1.2;
+          eyeSig += -cfg.dir * sAmp * sBell;
+        }
+        if (cfg.saccade === 'overt') {
+          const sdt = elapsed - OVERT_OFFSET;
+          const sBell = Math.exp(-(sdt * sdt) / (2 * SACCADE_SIGMA * SACCADE_SIGMA));
+          const sAmp = cfg.peak * (1 - cfg.gain) * 1.5;
+          eyeSig += -cfg.dir * sAmp * sBell;
+        }
+
+        this.capturing.t.push(elapsed - IMP_PEAK_OFFSET);
+        this.capturing.head.push(this.smoothedHead);
+        this.capturing.eye.push(eyeSig);
+        lastEyeSig = eyeSig;
+      }
+      eyeHistory[i] = lastEyeSig;
+    }
+
+    // Para fin-de-impulso usar último valor disponible (puede ser stale si
+    // este tick no recibió samples nuevos: en ese caso solo cuenta tiempo).
+    const head = N_S > 0 ? samples[N_S - 1] : serial.gyroYaw;
+
+    if (this.impCfg) {
+      const cfg = this.impCfg;
+      const elapsed = now - cfg.startMs;
+
+      eye += lastEyeSig;
+
+      // Animación gaze
+      const phase = elapsed / IMP_DURATION_MS;
+      this.gaze = (phase > 0 && phase < 1) ? -cfg.dir * 3 * Math.sin(Math.PI * phase) : 0;
+
+      // Fin de impulso: bajo umbral sostenido o duración máxima
+      const belowThr = Math.abs(head) < IMPULSE_END_THR;
+      if (belowThr) {
+        if (this.belowSinceMs === null) this.belowSinceMs = now;
+        const ended = (now - this.belowSinceMs) >= IMPULSE_END_HOLD_MS;
+        if (ended || elapsed > MAX_IMPULSE_MS) {
+          if (elapsed >= MIN_IMPULSE_MS) this.commitImpulse();
+          else this.capturing = null;
+          this.impCfg = null;
+          this.belowSinceMs = null;
+        }
+      } else {
+        this.belowSinceMs = null;
+      }
+    } else {
+      this.gaze = 0;
+    }
+
+    // Rotar buffers de plot una entrada por cada sample real recibido.
+    // Si no hubo samples este tick, no rotar (evita plateaus en TraceChart).
+    if (N_S > 0) {
+      const k = Math.min(N_S, N);
+      this.tBuf.copyWithin(0, k);
+      this.headBuf.copyWithin(0, k);
+      this.eyeBuf.copyWithin(0, k);
+      // Si N_S>N, conservar las últimas N samples del lote.
+      const start = N_S - k;
+      const eyeNoise = (Math.random() - 0.5) * 3;
+      for (let i = 0; i < k; i++) {
+        const idx = N - k + i;
+        const si = start + i;
+        this.tBuf[idx] = tSec - (N_S - 1 - si) / FS;
+        this.headBuf[idx] = smoothHistory[si];
+        this.eyeBuf[idx] = eyeHistory[si] + eyeNoise;
+      }
+      this.rev++;
+    }
+  }
+
   private commitImpulse() {
     if (!this.capturing) return;
     const c = this.capturing;
@@ -404,3 +551,18 @@ class Simulator {
 }
 
 export const sim = new Simulator();
+
+/** Resuelve la lista efectiva de artefactos para un canal:
+ *  si el canal define artefactos, ésos; si no, los defaults del EyeSet activo. */
+function resolveArtifacts(c: ChannelConfig): ArtifactConfig[] {
+  if (c.artifacts.length > 0) return c.artifacts;
+  return eyeset.active?.artifacts ?? [];
+}
+
+/** Sortea como mucho un artefacto por impulso (orden recibido = orden de prioridad). */
+function rollArtifact(list: ArtifactConfig[]): ImpulseTrigger['artifact'] {
+  for (const a of list) {
+    if (Math.random() < a.probability) return a.artifact;
+  }
+  return null;
+}
