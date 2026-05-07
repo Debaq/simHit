@@ -6,8 +6,10 @@
   import ImpulseChart from '$lib/components/ImpulseChart.svelte';
   import ResultsPanel from '$lib/components/ResultsPanel.svelte';
   import { sim } from '$lib/simulator.svelte';
+  import { scenarios } from '$lib/scenario.svelte';
 
   onMount(() => {
+    scenarios.load();
     sim.connect();
   });
   onDestroy(() => sim.disconnect());
@@ -24,13 +26,6 @@
       <div class="eye">
         <EyeView value={sim.gaze} blinkFrame={sim.blinkFrame} connected={sim.connected} />
         <div class="eye-controls">
-          <button
-            class:primary={sim.connected && sim.running}
-            disabled={!sim.connected}
-            onclick={() => (sim.running ? sim.stopRunning() : sim.startRunning())}
-          >
-            {sim.running ? '■ Detener simulación' : '▶ Simular impulsos'}
-          </button>
           <button onclick={() => (sim.connected ? sim.disconnect() : sim.connect())}>
             {sim.connected ? 'Desconectar' : 'Conectar'}
           </button>

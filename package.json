@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@xyflow/svelte": "^1.5.2"
+  }
+}

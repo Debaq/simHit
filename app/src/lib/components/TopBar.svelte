@@ -1,10 +1,8 @@
 <script lang="ts">
-  let laser = $state(false);
-  let ledRed = $state(false);
-  let ledGreen = $state(false);
-  let ledBlue = $state(false);
+  import { page } from '$app/state';
   let connected = $state(false);
   let port = $state('—');
+  let path = $derived(page.url?.pathname ?? '/');
 </script>
 
 <header class="topbar">
@@ -16,24 +14,10 @@
     </div>
   </div>
 
-  <div class="controls">
-    <button class:active={laser} onclick={() => laser = !laser}>
-      <span class="dot" style:background={laser ? 'var(--primary)' : 'var(--border-strong)'}></span>
-      LASER
-    </button>
-    <button class:active={ledRed} onclick={() => ledRed = !ledRed}>
-      <span class="dot" style:background={ledRed ? '#dc2626' : 'var(--border-strong)'}></span>
-      LED Rojo
-    </button>
-    <button class:active={ledGreen} onclick={() => ledGreen = !ledGreen}>
-      <span class="dot" style:background={ledGreen ? '#16a34a' : 'var(--border-strong)'}></span>
-      LED Verde
-    </button>
-    <button class:active={ledBlue} onclick={() => ledBlue = !ledBlue}>
-      <span class="dot" style:background={ledBlue ? '#2563eb' : 'var(--border-strong)'}></span>
-      LED Azul
-    </button>
-  </div>
+  <nav class="nav">
+    <a href="/" class:active={path === '/'}>Simulador</a>
+    <a href="/docente" class:active={path === '/docente'}>Modo docente</a>
+  </nav>
 
   <div class="status">
     <div class="port">
@@ -69,10 +53,18 @@
   .title { font-weight: 700; font-size: 16px; line-height: 1; }
   .subtitle { font-size: 11px; color: var(--text-muted); }
 
-  .controls { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-  .controls button { display: inline-flex; align-items: center; gap: 8px; }
-  .controls button.active { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
-  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .nav { display: flex; gap: 4px; justify-content: center; }
+  .nav a {
+    text-decoration: none;
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    transition: background .15s, color .15s;
+  }
+  .nav a:hover { background: var(--primary-soft); color: var(--primary); }
+  .nav a.active { background: var(--primary); color: white; }
 
   .status { display: flex; align-items: center; gap: 14px; }
   .port { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }

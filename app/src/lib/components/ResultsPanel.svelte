@@ -1,5 +1,6 @@
 <script lang="ts">
   import { sim } from '$lib/simulator.svelte';
+  import { scenarios } from '$lib/scenario.svelte';
 
   const fmt = (n: number) => n.toFixed(2);
   const gainColor = (g: number) =>
@@ -15,6 +16,10 @@
       ? 0
       : sim.impulsesRL.reduce((a, i) => a + i.gain, 0) / sim.impulsesRL.length
   );
+
+  function runScenario() {
+    if (scenarios.active) sim.runScenario(scenarios.active);
+  }
 </script>
 
 <div class="card results">
@@ -34,16 +39,32 @@
       </div>
       <div class="m-sub">{sim.impulsesRL.length} impulsos</div>
     </div>
+    <div class="scenario-info">
+      {#if scenarios.active}
+        <span class="label">Escenario:</span>
+        <span class="name">{scenarios.active.name}</span>
+      {:else}
+        <span class="muted">Sin escenario activo</span>
+      {/if}
+      {#if sim.currentStep}
+        <span class="step">→ {sim.currentStep}</span>
+      {/if}
+    </div>
     <div class="actions">
       <button
         class="primary"
-        disabled={!sim.connected}
-        onclick={() => (sim.running ? sim.stopRunning() : sim.startRunning())}
+        disabled={!sim.connected || !scenarios.active}
+        onclick={() => (sim.mode === 'scenario' ? sim.stop() : runScenario())}
       >
-        {sim.running ? '■ Detener' : '▶ Iniciar test'}
+        {sim.mode === 'scenario' ? '■ Detener test' : '▶ Iniciar test'}
+      </button>
+      <button
+        disabled={!sim.connected}
+        onclick={() => (sim.mode === 'free' ? sim.stop() : sim.startFreeMode())}
+      >
+        {sim.mode === 'free' ? '■ Detener libre' : '⤧ Modo libre'}
       </button>
       <button onclick={() => sim.clearImpulses()}>Limpiar</button>
-      <button disabled>Exportar</button>
     </div>
   </div>
 </div>
@@ -65,10 +86,25 @@
   .m-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
   .m-value { font-size: 28px; font-weight: 700; line-height: 1.1; margin: 4px 0; font-family: ui-monospace, monospace; }
   .m-sub { font-size: 11px; color: var(--text-muted); }
+  .scenario-info {
+    grid-column: 1 / -1;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    font-size: 11px;
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  }
+  .scenario-info .label { color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; font-size: 10px; }
+  .scenario-info .name { color: var(--primary); font-weight: 600; }
+  .scenario-info .step { color: var(--text-muted); font-style: italic; }
+  .scenario-info .muted { color: var(--text-muted); font-style: italic; }
   .actions {
     grid-column: 1 / -1;
     display: flex; gap: 8px;
     justify-content: center;
+    flex-wrap: wrap;
   }
+  .actions button { font-size: 12px; padding: 6px 10px; }
   button:disabled { opacity: .4; cursor: not-allowed; }
 </style>
