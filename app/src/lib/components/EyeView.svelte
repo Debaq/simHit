@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { eyeset, FRAMES_COUNT } from '$lib/eyeset.svelte';
+  import { eyeset, type Frame } from '$lib/eyeset.svelte';
   import { onMount } from 'svelte';
 
   let {
@@ -16,23 +16,40 @@
 
   onMount(() => eyeset.load());
 
-  const HORIZ_FRAMES = 7;
-  const BLINK_FRAMES = 5;
-  const TOTAL = HORIZ_FRAMES + BLINK_FRAMES;
+  let active = $derived(eyeset.active);
 
-  let idx = $derived.by(() => {
-    if (!connected) return -1;
+  // Selección de frame en función de value (eje horizontal -3..3) o blinkFrame
+  let currentFrame = $derived.by<Frame | null>(() => {
+    if (!connected || !active) return null;
     if (blinkFrame !== null && blinkFrame !== undefined) {
-      return HORIZ_FRAMES + Math.max(0, Math.min(BLINK_FRAMES - 1, blinkFrame));
+      const arr = active.blink;
+      if (arr.length === 0) return null;
+      const idx = Math.max(0, Math.min(arr.length - 1, Math.round(blinkFrame)));
+      return arr[idx];
     }
-    const clamped = Math.max(-3, Math.min(3, value));
-    return 3 + Math.round(clamped);
+    const v = Math.max(-3, Math.min(3, value));
+    const r = Math.round(v);
+    if (r === 0) return active.centerFrame;
+    if (r > 0) {
+      const arr = active.rays.right;
+      if (arr.length === 0) return active.centerFrame;
+      return arr[Math.min(arr.length - 1, r - 1)];
+    }
+    const arr = active.rays.left;
+    if (arr.length === 0) return active.centerFrame;
+    return arr[Math.min(arr.length - 1, -r - 1)];
   });
 
-  let posPct = $derived(idx >= 0 ? (idx / (TOTAL - 1)) * 100 : 0);
-  let active = $derived(eyeset.active);
-  let marker = $derived(idx >= 0 && showTracker && active ? active.pupils[idx] : null);
-  let customSrc = $derived(active && !active.builtin && idx >= 0 ? (active.frameUrls?.[idx] ?? '') : '');
+  let bgImage = $derived.by(() => {
+    if (!currentFrame) return '';
+    if (currentFrame.spriteY !== undefined && active?.spriteUrl) return `url(${active.spriteUrl})`;
+    if (currentFrame.url) return `url(${currentFrame.url})`;
+    return '';
+  });
+  let bgPosY = $derived(currentFrame?.spriteY ?? 0);
+  let isSprite = $derived(!!(currentFrame?.spriteY !== undefined && active?.spriteUrl));
+  let marker = $derived(showTracker && currentFrame ? { x: currentFrame.pupilX, y: currentFrame.pupilY } : null);
+  let hasMarker = $derived(!!marker && (marker.x !== 0 || marker.y !== 0));
 </script>
 
 <div class="card eye-card">
@@ -41,27 +58,25 @@
     <div class="eye-frame" class:disconnected={!connected}>
       {#if !connected}
         <!-- bloque negro -->
-      {:else if active?.builtin}
+      {:else if bgImage}
         <div
           class="sprite"
-          style:background-image="url({active.spriteUrl})"
-          style:background-position-y="{posPct}%"
+          class:fit={!isSprite}
+          style:background-image={bgImage}
+          style:background-position-y={isSprite ? `${bgPosY}%` : '50%'}
         ></div>
-      {:else if customSrc}
-        <img class="sprite img" src={customSrc} alt="" />
       {:else}
         <div class="placeholder">Frame sin imagen</div>
       {/if}
 
-      {#if marker && connected}
-        <span class="tracker" style:left="{marker.pupilX * 100}%" style:top="{marker.pupilY * 100}%">
+      {#if hasMarker && connected && marker}
+        <span class="tracker" style:left="{marker.x * 100}%" style:top="{marker.y * 100}%">
           <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="16" y1="2" x2="16" y2="30" stroke="currentColor" stroke-width="1"/><line x1="2" y1="16" x2="30" y2="16" stroke="currentColor" stroke-width="1"/></svg>
         </span>
       {/if}
     </div>
     <div class="meta">
       <span>posición: <code>{value.toFixed(1)}</code></span>
-      <span>frame: <code>{idx}</code></span>
       <span class:on={connected} class="conn-dot">{connected ? 'conectado' : 'sin señal'}</span>
     </div>
   </div>
@@ -86,7 +101,7 @@
     background-size: 100% 1200%;
     background-position-x: 0;
   }
-  .sprite.img { object-fit: cover; display: block; }
+  .sprite.fit { background-size: cover; background-position: center; }
   .placeholder {
     width: 100%; height: 100%;
     display: flex; align-items: center; justify-content: center;

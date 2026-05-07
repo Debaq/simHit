@@ -10,7 +10,7 @@ Hoja de ruta de funcionalidades, agrupadas por hitos. Las fechas son objetivos, 
 - Simulador 200 Hz con generador de impulsos y animación realista del ojo.
 - Dos canales laterales (LL / RL) cubriendo el plano horizontal.
 - Conexión serial real con la placa SimHIT.
-- Editor multi-set de ojos / cámara con marcado de pupilas.
+- Editor multi-set de ojos / cámara con layout estrella (centro + 8 direcciones cardinales/diagonales) + secuencia lineal de parpadeo. Frames intermedios insertables con `+` entre cualquier par adyacente. Marcado de pupila por frame.
 - Editor de escenarios (biblioteca + casos predefinidos).
 - Generación de informes vHIT con export a PDF (vía diálogo de impresión).
 - Modal de análisis detallado de impulsos por canal (individual / superpuestas, métricas, exclusión por prueba).
