@@ -19,6 +19,20 @@ export type ImpulseTrigger = {
 };
 
 const FS = 200;
+
+// Heurística simple de aceptación de impulso (M1 — refinar en M3)
+function evaluateImpulse(imp: Impulse, peakHead: number, gain: number) {
+  const reasons: string[] = [];
+  if (peakHead < 100) reasons.push('pico bajo (<100°/s)');
+  if (peakHead > 280) reasons.push('pico excesivo (>280°/s)');
+  if (gain < 0.4) reasons.push('ganancia muy baja');
+  if (gain > 1.4) reasons.push('ganancia anómala');
+  // duración aproximada por nº de muestras del impulso
+  const durMs = imp.t.length ? imp.t[imp.t.length - 1] - imp.t[0] : 0;
+  if (durMs < 80) reasons.push('duración corta');
+  if (durMs > 260) reasons.push('duración larga');
+  return { ok: reasons.length === 0, reasons, peak: peakHead, gain };
+}
 const WINDOW_S = 5;
 const N = FS * WINDOW_S;
 const IMP_DURATION_MS = 350;
@@ -39,6 +53,14 @@ class Simulator {
   impulsesLL = $state<Impulse[]>([]);
   impulsesRL = $state<Impulse[]>([]);
   rev = $state(0);
+
+  // Pose simulada de la cabeza (mock — luego vendrá del firmware)
+  headYaw = $state(0);    // °, neutro = 0; izq < 0; der > 0
+  headPitch = $state(0);  // °, lateral neutro ≈ 0; cabeza abajo > 0
+  headRoll = $state(0);   // °, neutro = 0; oreja-hombro izq < 0; der > 0
+  // Veredicto del último impulso capturado
+  lastImpulse = $state<Impulse | null>(null);
+  lastVerdict = $state<{ ok: boolean; reasons: string[]; peak: number; gain: number } | null>(null);
 
   // alias para no romper API previa
   get running() { return this.mode !== 'idle'; }
@@ -298,6 +320,24 @@ class Simulator {
     this.tBuf[N - 1] = tSec;
     this.headBuf[N - 1] = head;
     this.eyeBuf[N - 1] = eye;
+
+    // ===== Pose mock =====
+    // yaw: integramos velocidad cabeza durante el impulso; en idle vuelve a 0 lentamente
+    const dt = 1 / FS;
+    if (this.impCfg) {
+      this.headYaw += head * dt; // °/s × s
+    } else {
+      this.headYaw *= 0.92;       // decae a 0
+      this.headYaw += (Math.random() - 0.5) * 0.4; // micro-tremor
+    }
+    if (Math.abs(this.headYaw) < 0.05) this.headYaw = 0;
+    // pitch: deriva lenta alrededor de 0 (lateral neutro)
+    this.headPitch += (Math.random() - 0.5) * 0.15;
+    this.headPitch *= 0.95;
+    // roll: micro-oscilación alrededor de 0
+    this.headRoll += (Math.random() - 0.5) * 0.18;
+    this.headRoll *= 0.94;
+
     this.rev++;
   }
 
@@ -318,6 +358,8 @@ class Simulator {
     if (c.side === 'LL') this.impulsesLL = [...this.impulsesLL, imp].slice(-15);
     else this.impulsesRL = [...this.impulsesRL, imp].slice(-15);
     this.capturing = null;
+    this.lastImpulse = imp;
+    this.lastVerdict = evaluateImpulse(imp, peakHead, gain);
   }
 
   private scheduleNextRandom() {

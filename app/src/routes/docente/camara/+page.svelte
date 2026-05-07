@@ -88,7 +88,7 @@
     </div>
 
     {#if active?.builtin}
-      <div class="hint-banner">🔒 Set predefinido — los frames no se pueden reemplazar, pero podés marcar las pupilas. Para crear un set propio: <b>Duplicar</b> o <b>+ Nuevo set</b>.</div>
+      <div class="hint-banner">🔒 Set predefinido — los frames no se pueden reemplazar, pero puedes marcar las pupilas. Para crear un set propio: <b>Duplicar</b> o <b>+ Nuevo set</b>.</div>
     {/if}
 
     <div class="layout">
@@ -188,8 +188,8 @@
 </div>
 
 <style>
-  .app { min-height: 100vh; background: var(--bg); display: flex; flex-direction: column; }
-  .page { padding: 16px; max-width: 1300px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+  .app { min-height: 100vh; background: var(--bg); }
+  .page { padding: 16px; width: 100%; box-sizing: border-box; }
   .head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px; gap: 16px; }
   .head h1 { margin: 0 0 4px; font-size: 22px; }
   .muted { color: var(--text-muted); font-size: 12px; }

@@ -25,9 +25,6 @@
       </div>
       <div class="eye">
         <EyeView value={sim.gaze} blinkFrame={sim.blinkFrame} connected={sim.cameraOn} />
-        {#if !sim.cameraOn}
-          <div class="hint-cam">Encendé la cámara desde la barra superior para visualizar el ojo.</div>
-        {/if}
       </div>
     </section>
 
@@ -61,22 +58,16 @@
   }
   .row.top {
     grid-template-columns: 2fr 1fr;
-    flex: 1.3;
+    flex: 1.1;
     min-height: 0;
   }
   .row.bottom {
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: 1fr 1.2fr 1fr;
     flex: 1;
     min-height: 0;
   }
+  .row > * { min-height: 0; min-width: 0; overflow: hidden; }
   .trace, .eye { display: flex; flex-direction: column; min-height: 0; }
   .eye { gap: 8px; }
   .eye :global(.eye-card) { flex: 1; }
-  .hint-cam {
-    text-align: center; font-size: 11px;
-    color: var(--text-muted); padding: 8px;
-    background: var(--surface-2);
-    border: 1px dashed var(--border-strong);
-    border-radius: var(--radius-sm);
-  }
 </style>

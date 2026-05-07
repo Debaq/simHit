@@ -87,6 +87,11 @@
 
 <style>
   .topbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
     display: grid;
     grid-template-columns: auto 1fr auto;
     align-items: center;
@@ -95,6 +100,7 @@
     background: var(--surface);
     border-bottom: 1px solid var(--border);
     box-shadow: var(--shadow-sm);
+    /* altura referencia ~58px usada por padding-top de las páginas */
   }
   .brand {
     display: flex; align-items: center; gap: 10px;

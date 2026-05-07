@@ -17,6 +17,8 @@
   let sideColor = $derived(side === 'LL' ? 'var(--side-ll)' : 'var(--side-rl)');
 
   let impulses = $derived(side === 'LL' ? sim.impulsesLL : sim.impulsesRL);
+  let gain = $derived(impulses.length === 0 ? 0 : impulses.reduce((a, i) => a + i.gain, 0) / impulses.length);
+  let gainColor = $derived(gain >= 0.8 ? 'var(--success)' : gain >= 0.6 ? 'var(--warn)' : 'var(--danger)');
 
   function xScale(t: number) {
     return PAD.l + ((t - T_MIN) / (T_MAX - T_MIN)) * PW;
@@ -40,6 +42,10 @@
   <div class="card-title">
     <span class="side-tag">{side}</span> {label}
     <span class="count">{impulses.length}</span>
+    <span class="gain" style:color={gainColor} title="Ganancia VOR media">
+      <span class="gain-lab">gain</span>
+      <b>{impulses.length ? gain.toFixed(2) : '—'}</b>
+    </span>
     <span class="legend">
       <span><i class="solid"></i>cabeza</span>
       <span><i class="dashed"></i>ojo</span>
@@ -76,8 +82,8 @@
 <style>
   .impulse { display: flex; flex-direction: column; min-height: 0; }
   .card-title { display: flex; align-items: center; justify-content: space-between; }
-  .card-body { padding: 8px 6px; flex: 1; }
-  .plot { width: 100%; height: 100%; min-height: 140px; display: block; }
+  .card-body { padding: 4px 6px; flex: 1; min-height: 0; display: flex; }
+  .plot { width: 100%; height: 100%; min-height: 0; display: block; }
   .impulse { border-top: 3px solid var(--side); }
   .side-tag {
     display: inline-block;
@@ -98,6 +104,9 @@
     opacity: 0.9;
   }
   .card-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .gain { display: inline-flex; align-items: baseline; gap: 4px; font-family: ui-monospace, monospace; }
+  .gain-lab { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+  .gain b { font-size: 16px; font-weight: 700; }
   .legend { display: inline-flex; gap: 8px; margin-left: auto; font-size: 10px; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
   .legend span { display: inline-flex; align-items: center; gap: 4px; }
   .legend i {

@@ -3,10 +3,7 @@
   import { sim } from '$lib/simulator.svelte';
   import { scenarios } from '$lib/scenario.svelte';
   import { reports, emptyFindings, type ImpulseSnapshot, type Report } from '$lib/report.svelte';
-
-  const fmt = (n: number) => n.toFixed(2);
-  const gainColor = (g: number) =>
-    g >= 0.8 ? 'var(--success)' : g >= 0.6 ? 'var(--warn)' : 'var(--danger)';
+  import HeadLiveView from './HeadLiveView.svelte';
 
   let gainLL = $derived(
     sim.impulsesLL.length === 0
@@ -45,11 +42,11 @@
 
   function generateReport() {
     if (sim.impulsesLL.length + sim.impulsesRL.length === 0) {
-      alert('Realizá un examen antes de generar el informe.');
+      alert('Realiza un examen antes de generar el informe.');
       return;
     }
     if (sim.mode !== 'idle') {
-      alert('Detené el examen antes de generar el informe.');
+      alert('Detén el examen antes de generar el informe.');
       return;
     }
     const id = crypto.randomUUID();
@@ -86,21 +83,10 @@
 </script>
 
 <div class="card results">
-  <div class="card-title">Resultados</div>
+  <div class="card-title">Captura en vivo · Resultados</div>
   <div class="card-body grid">
-    <div class="metric" style:--side="var(--side-ll)">
-      <div class="m-label"><span class="side-chip">LL</span> Ganancia</div>
-      <div class="m-value" style:color={gainColor(gainLL)}>
-        {sim.impulsesLL.length ? fmt(gainLL) : '—'}
-      </div>
-      <div class="m-sub">{sim.impulsesLL.length} impulsos</div>
-    </div>
-    <div class="metric" style:--side="var(--side-rl)">
-      <div class="m-label"><span class="side-chip">RL</span> Ganancia</div>
-      <div class="m-value" style:color={gainColor(gainRL)}>
-        {sim.impulsesRL.length ? fmt(gainRL) : '—'}
-      </div>
-      <div class="m-sub">{sim.impulsesRL.length} impulsos</div>
+    <div class="head-live-wrap">
+      <HeadLiveView />
     </div>
     <div class="scenario-info">
       <label class="picker">
@@ -146,32 +132,14 @@
 </div>
 
 <style>
-  .results { display: flex; flex-direction: column; }
+  .results { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .results .card-body { overflow: auto; min-height: 0; }
   .grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
-  .metric {
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-top: 3px solid var(--side);
-    border-radius: var(--radius-sm);
-    padding: 10px 12px;
-    text-align: center;
-  }
-  .side-chip {
-    background: var(--side);
-    color: white;
-    padding: 1px 6px;
-    border-radius: 3px;
-    font-size: 9px;
-    margin-right: 4px;
-    letter-spacing: .04em;
-  }
-  .m-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
-  .m-value { font-size: 28px; font-weight: 700; line-height: 1.1; margin: 4px 0; font-family: ui-monospace, monospace; }
-  .m-sub { font-size: 11px; color: var(--text-muted); }
+  .head-live-wrap { padding: 0 2px; }
   .scenario-info {
     grid-column: 1 / -1;
     background: var(--surface-2);

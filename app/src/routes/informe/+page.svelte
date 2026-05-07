@@ -30,7 +30,7 @@
     {#if reports.list.length === 0}
       <div class="empty">
         <p>Aún no hay informes guardados.</p>
-        <p class="muted">Realizá un examen y generá un informe desde el simulador.</p>
+        <p class="muted">Realiza un examen y genera un informe desde el simulador.</p>
         <button class="primary" onclick={() => goto('/')}>Ir al simulador</button>
       </div>
     {:else}
@@ -78,8 +78,8 @@
 </div>
 
 <style>
-  .app { min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); }
-  .page { padding: 24px; max-width: 1200px; width: 100%; margin: 0 auto; }
+  .app { min-height: 100vh; background: var(--bg); }
+  .page { padding: 16px 24px; width: 100%; box-sizing: border-box; }
   .page-head { margin-bottom: 16px; }
   .page-head h1 { margin: 0; font-size: 24px; }
   .muted { color: var(--text-muted); font-size: 13px; }

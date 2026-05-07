@@ -4,8 +4,19 @@
   import { goto } from '$app/navigation';
   import TopBar from '$lib/components/TopBar.svelte';
   import ImpulsePlotStatic from '$lib/components/ImpulsePlotStatic.svelte';
-  import { reports, DIAGNOSIS_LABELS, emptyFindings, type Report, type Diagnosis } from '$lib/report.svelte';
+  import ImpulseModal from '$lib/components/ImpulseModal.svelte';
+  import { reports, DIAGNOSIS_LABELS, emptyFindings, type Report, type Diagnosis, type Side } from '$lib/report.svelte';
   import { scenarios } from '$lib/scenario.svelte';
+
+  let modalOpen = $state(false);
+  let modalSide = $state<Side>('LL');
+  function openModal(s: Side) { modalSide = s; modalOpen = true; }
+
+  // Canales disponibles. Hoy LL/RL; futuro multicanal: añadir LA/RA/LP/RP aquí.
+  const CHANNELS: { id: Side; label: string; color?: string }[] = [
+    { id: 'LL', label: 'Lateral izquierdo' },
+    { id: 'RL', label: 'Lateral derecho' },
+  ];
 
   let report = $state<Report | null>(null);
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -93,7 +104,8 @@
 
     <main class="page">
       <article class="report">
-        <header class="rep-head">
+        <!-- Cabecera formal: solo en PDF -->
+        <header class="rep-head print-only">
           <div class="brand">
             <img src="/brand/logo-sm.png" alt="" />
             <div>
@@ -104,37 +116,47 @@
           <div class="meta">
             <div><strong>Fecha:</strong> {fmtDate(report.date)}</div>
             <div><strong>Examen:</strong> <code>{report.examenCode}</code></div>
-            <div>
-              {#if report.submitted}
-                <span class="tag ok">✓ Enviado</span>
-              {:else}
-                <span class="tag draft">Borrador</span>
-              {/if}
-            </div>
           </div>
         </header>
 
+        <!-- Barra de estado + acciones: solo en pantalla -->
+        <div class="status-bar screen-only">
+          <div class="status-left">
+            <button class="ghost" onclick={() => goto('/informe')} title="Volver a informes">←</button>
+            <span class="status-item"><strong>Examen</strong> <code>{report.examenCode}</code></span>
+            <span class="status-item"><strong>Fecha</strong> {fmtDate(report.date)}</span>
+            {#if report.submitted}
+              <span class="tag ok">✓ Enviado</span>
+            {:else}
+              <span class="tag draft">Borrador</span>
+            {/if}
+          </div>
+          <div class="status-right">
+            {#if !report.submitted}
+              <button onclick={submit}>Enviar informe</button>
+            {/if}
+            <button class="primary" onclick={downloadPdf}>⬇ Descargar PDF</button>
+          </div>
+        </div>
+
         <section class="datos">
-          <h2>Identificación</h2>
-          <div class="grid-3">
+          <h2>Identificación y paciente</h2>
+          <div class="datos-grid">
             <label>
-              <span>Profesional responsable</span>
-              <input type="text" bind:value={report.examiner} oninput={scheduleSave} disabled={report.submitted} placeholder="Nombre y apellido" />
+              <span>Profesional</span>
+              <input type="text" bind:value={report.examiner} oninput={scheduleSave} disabled={report.submitted} placeholder="Nombre" />
             </label>
             <label>
               <span>Profesión / cargo</span>
-              <input type="text" bind:value={report.examinerTitle} oninput={scheduleSave} disabled={report.submitted} placeholder="Fonoaudiólogo, Otorrino, etc." />
+              <input type="text" bind:value={report.examinerTitle} oninput={scheduleSave} disabled={report.submitted} placeholder="Fonoaudiólogo…" />
             </label>
             <label>
               <span>Institución</span>
               <input type="text" bind:value={report.institution} oninput={scheduleSave} disabled={report.submitted} placeholder="Centro / clínica" />
             </label>
-          </div>
-          <h3>Paciente</h3>
-          <div class="grid-3">
             <label>
-              <span>Nombre y apellido</span>
-              <input type="text" bind:value={report.patientName} oninput={scheduleSave} disabled={report.submitted} />
+              <span>Paciente</span>
+              <input type="text" bind:value={report.patientName} oninput={scheduleSave} disabled={report.submitted} placeholder="Nombre y apellido" />
             </label>
             <label>
               <span>RUT / Ficha</span>
@@ -144,17 +166,17 @@
               <span>Edad</span>
               <input type="text" bind:value={report.patientAge} oninput={scheduleSave} disabled={report.submitted} placeholder="años" />
             </label>
+            <label class="full-row">
+              <span>Motivo de consulta / antecedentes relevantes</span>
+              <textarea
+                rows="2"
+                bind:value={report.patientReason}
+                oninput={scheduleSave}
+                disabled={report.submitted}
+                placeholder="Vértigo agudo, mareos, hipoacusia, antecedentes de ototoxicidad, etc."
+              ></textarea>
+            </label>
           </div>
-          <label class="full">
-            <span>Motivo de consulta / antecedentes relevantes</span>
-            <textarea
-              rows="2"
-              bind:value={report.patientReason}
-              oninput={scheduleSave}
-              disabled={report.submitted}
-              placeholder="Vértigo agudo, mareos, hipoacusia, antecedentes de ototoxicidad, etc."
-            ></textarea>
-          </label>
         </section>
 
         <section class="resultados">
@@ -183,14 +205,14 @@
         <section class="plots">
           <h2>Gráficos por lado</h2>
           <div class="grid-2">
-            <div class="plot-card">
-              <div class="plot-title"><span class="side-chip ll">LL</span> Lateral izquierdo</div>
+            <button class="plot-card" onclick={() => openModal('LL')} title="Click: análisis detallado">
+              <div class="plot-title"><span class="side-chip ll">LL</span> Lateral izquierdo <span class="muted">· click ↗</span></div>
               <ImpulsePlotStatic side="LL" impulses={impulsesOf('LL')} />
-            </div>
-            <div class="plot-card">
-              <div class="plot-title"><span class="side-chip rl">RL</span> Lateral derecho</div>
+            </button>
+            <button class="plot-card" onclick={() => openModal('RL')} title="Click: análisis detallado">
+              <div class="plot-title"><span class="side-chip rl">RL</span> Lateral derecho <span class="muted">· click ↗</span></div>
               <ImpulsePlotStatic side="RL" impulses={impulsesOf('RL')} />
-            </div>
+            </button>
           </div>
         </section>
 
@@ -210,8 +232,8 @@
         <section class="interpretation">
           <h2>Interpretación clínica</h2>
           <textarea
-            rows="5"
-            placeholder="Describí los hallazgos del registro: simetría, ganancia VOR, presencia y tipo de sacadas correctivas, calidad del registro, etc."
+            rows="4"
+            placeholder="Describe los hallazgos del registro: simetría, ganancia VOR, presencia y tipo de sacadas correctivas, calidad del registro, etc."
             bind:value={report.interpretation}
             oninput={scheduleSave}
             disabled={report.submitted}
@@ -227,7 +249,7 @@
             {/each}
           </select>
           <textarea
-            rows="3"
+            rows="2"
             placeholder="Comentarios adicionales, recomendaciones, sugerencias de seguimiento..."
             bind:value={report.comments}
             oninput={scheduleSave}
@@ -235,7 +257,8 @@
           ></textarea>
         </section>
 
-        <footer class="rep-foot">
+        <!-- Pie con firma: solo en PDF -->
+        <footer class="rep-foot print-only">
           <div class="meta-foot">
             <div><strong>Equipo:</strong> SimHIT</div>
             {#if report.institution}
@@ -273,37 +296,58 @@
         {/if}
       </article>
 
-      <aside class="actions no-print">
-        {#if !report.submitted}
-          <button class="primary big" onclick={submit}>Enviar informe</button>
-          <p class="hint">Borrador autoguardado.<br>Una vez enviado el informe queda inmodificable.</p>
-        {:else}
-          <button class="primary big" onclick={downloadPdf}>⬇ Descargar PDF</button>
-          <p class="hint">En el diálogo seleccioná "Guardar como PDF".</p>
-        {/if}
-        <button onclick={() => goto('/informe')}>← Volver a informes</button>
-      </aside>
     </main>
   </div>
+
+  <ImpulseModal
+    open={modalOpen}
+    side={modalSide}
+    channels={CHANNELS}
+    impulsesBy={(s) => report?.impulses.filter((i) => i.side === s) ?? []}
+    onClose={() => (modalOpen = false)}
+    onChangeSide={(s) => (modalSide = s)}
+  />
 {:else}
   <p>Cargando...</p>
 {/if}
 
 <style>
-  .app { min-height: 100vh; background: var(--bg); display: flex; flex-direction: column; }
+  .app { min-height: 100vh; background: var(--bg); }
   .page {
-    display: grid;
-    grid-template-columns: 1fr 240px;
-    gap: 16px;
-    padding: 16px;
-    max-width: 1200px;
+    padding: 12px 16px;
     width: 100%;
-    margin: 0 auto;
     box-sizing: border-box;
   }
   .report {
-    display: flex; flex-direction: column; gap: 14px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-content: start;
   }
+  .status-bar, .datos, .reveal, .rep-head, .rep-foot { grid-column: 1 / -1; }
+  .resultados, .findings { grid-column: 1; }
+  .plots, .interpretation, .diagnosis { grid-column: 2; }
+  @media (max-width: 900px) {
+    .report { grid-template-columns: 1fr; }
+    .resultados, .findings, .plots, .interpretation, .diagnosis { grid-column: 1; }
+  }
+
+  /* Visibilidad pantalla vs PDF */
+  .print-only { display: none !important; }
+  @media print { .screen-only { display: none !important; } .print-only { display: flex !important; } }
+
+  /* Barra de estado (pantalla) */
+  .status-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 8px 12px; box-shadow: var(--shadow-sm);
+    font-size: 12px; gap: 12px;
+  }
+  .status-left { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .status-right { display: flex; gap: 8px; align-items: center; }
+  .status-right button { padding: 6px 12px; font-size: 12px; }
+  .status-item strong { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: .05em; margin-right: 6px; }
+  .status-item code { font-family: ui-monospace, monospace; background: var(--primary-soft); color: var(--primary); padding: 2px 6px; border-radius: 4px; }
   .rep-head {
     display: flex; justify-content: space-between; align-items: center;
     background: var(--surface); border: 1px solid var(--border);
@@ -321,14 +365,16 @@
 
   section {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 14px 18px; box-shadow: var(--shadow-sm);
+    border-radius: var(--radius); padding: 10px 12px; box-shadow: var(--shadow-sm);
   }
-  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--primary); margin: 0 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--primary); margin: 0 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
 
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
-  h3 { font-size: 12px; text-transform: uppercase; color: var(--text-muted); letter-spacing: .04em; margin: 14px 0 6px; }
-  label.full { display: block; margin-top: 8px; }
+  .datos-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px 10px; }
+  .datos-grid label { min-width: 0; }
+  .datos-grid label.full-row { grid-column: 1 / -1; }
+  @media (max-width: 1100px) { .datos-grid { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 700px) { .datos-grid { grid-template-columns: repeat(2, 1fr); } }
   .meta-foot { font-size: 11px; color: var(--text-muted); }
   label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
   label span { color: var(--text-muted); font-weight: 600; font-size: 11px; }
@@ -354,8 +400,14 @@
   .side-chip.ll { background: var(--side-ll); }
   .side-chip.rl { background: var(--side-rl); }
 
-  .plot-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; }
+  .plot-card {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 8px; width: 100%; text-align: left; cursor: pointer; transition: border-color .15s, box-shadow .15s;
+    font: inherit; color: inherit;
+  }
+  .plot-card:hover { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
   .plot-title { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+  .plot-title .muted { color: var(--text-muted); font-weight: 400; font-size: 11px; }
 
   .check-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 13px; }
   .check-grid label { flex-direction: row; align-items: center; gap: 6px; }
@@ -383,16 +435,12 @@
   .reveal-name { font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
   .reveal-desc { color: var(--text-muted); font-style: italic; margin: 0 0 10px; font-size: 12px; }
 
-  .actions { display: flex; flex-direction: column; gap: 10px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); height: fit-content; position: sticky; top: 16px; }
-  .actions button { width: 100%; }
-  .actions button.big { padding: 10px 14px; font-size: 14px; }
-  .hint { font-size: 11px; color: var(--text-muted); margin: 0; line-height: 1.4; }
-
   @media print {
     .no-print { display: none !important; }
     @page { size: A4; margin: 14mm 16mm; }
     .app, .page { background: white; padding: 0; max-width: none; display: block; }
-    .report { gap: 8px; }
+    .report { display: block; gap: 0; }
+    .report > section { margin-bottom: 8px; }
     section, .rep-head, .rep-foot {
       box-shadow: none; border: none; border-radius: 0; padding: 6px 0;
       background: white;

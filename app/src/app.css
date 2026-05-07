@@ -43,6 +43,8 @@
 
 html, body { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); }
+/* Compensa el TopBar fixed (≈58px) — válido para todas las rutas */
+.app { padding-top: 58px; }
 
 button {
   font: inherit;
