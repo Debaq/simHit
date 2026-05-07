@@ -4,6 +4,21 @@
   import { scenarios } from '$lib/scenario.svelte';
   import { reports, emptyFindings, type ImpulseSnapshot, type Report } from '$lib/report.svelte';
   import HeadLiveView from './HeadLiveView.svelte';
+  import AudioSettings from './AudioSettings.svelte';
+  import { audio } from '$lib/audio.svelte';
+
+  let audioModalOpen = $state(false);
+
+  // Reproducir beep al cerrar cada impulso
+  let lastImpulseId = $state<number | null>(null);
+  $effect(() => {
+    const v = sim.lastVerdict;
+    const imp = sim.lastImpulse;
+    if (!v || !imp) return;
+    if (imp.id === lastImpulseId) return;
+    lastImpulseId = imp.id;
+    if (v.ok) audio.beepOk(); else audio.beepError();
+  });
 
   let gainLL = $derived(
     sim.impulsesLL.length === 0
@@ -83,7 +98,19 @@
 </script>
 
 <div class="card results">
-  <div class="card-title">Captura en vivo · Resultados</div>
+  <div class="card-title">
+    <span>Captura en vivo · Resultados</span>
+    <span class="title-actions">
+      <button
+        class="icon-btn"
+        class:on={audio.enabled}
+        onclick={() => audio.toggleEnabled()}
+        title={audio.enabled ? 'Silenciar sonido' : 'Activar sonido'}
+        aria-label="Toggle sonido"
+      >{audio.enabled ? '🔊' : '🔇'}</button>
+      <button class="icon-btn" onclick={() => (audioModalOpen = true)} title="Configurar sonido">⚙</button>
+    </span>
+  </div>
   <div class="card-body grid">
     <div class="head-live-wrap">
       <HeadLiveView />
@@ -131,6 +158,8 @@
   </div>
 </div>
 
+<AudioSettings open={audioModalOpen} onClose={() => (audioModalOpen = false)} />
+
 <style>
   .results { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
   .results .card-body { overflow: auto; min-height: 0; }
@@ -140,6 +169,16 @@
     gap: 8px;
   }
   .head-live-wrap { padding: 0 2px; }
+  .card-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .title-actions { display: inline-flex; gap: 4px; }
+  .icon-btn {
+    width: 28px; height: 28px; padding: 0; font-size: 14px;
+    border: 1px solid var(--border-strong); background: var(--surface);
+    border-radius: var(--radius-sm); cursor: pointer; display: inline-flex;
+    align-items: center; justify-content: center;
+  }
+  .icon-btn:hover { background: var(--primary-soft); border-color: var(--primary); }
+  .icon-btn.on { background: var(--success); color: white; border-color: var(--success); }
   .scenario-info {
     grid-column: 1 / -1;
     background: var(--surface-2);

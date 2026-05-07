@@ -34,9 +34,11 @@ Objetivo: que el operador pueda ejecutar los impulsos con retroalimentación inm
 
 ### Validación del impulso en vivo  ⏳
 - [x] Heurística básica de aceptación post-impulso (pico, ganancia, duración) → veredicto en `lastVerdict`.
+- [x] Feedback sonoro al cerrar la prueba (beep ok / error sintetizados con Web Audio API).
+- [x] Metrónomo configurable (BPM + acento) para entrenamiento con ritmo.
+- [x] Modal de configuración de sonido (frecuencia, duración, onda, volumen, prueba).
 - [ ] Detección automática de inicio / fin por umbral y derivada (no por ventana fija).
 - [ ] Clasificador de artefactos (parpadeo, movimiento previo, doble pico, pérdida de tracking).
-- [ ] Feedback sonoro al cerrar la prueba (beep ok / error).
 - [ ] Auto-descarte de pruebas inválidas con opción a recuperar.
 
 ### Guía de protocolo  ⏳
