@@ -330,13 +330,15 @@
       <div class="empty">Sin impulsos aún.</div>
     {:else if verdict}
       <div class="imp-row">
-        <div class="imp-cell"><span class="ro-lab">pico</span><b>{verdict.peak.toFixed(0)}<span class="unit">°/s</span></b></div>
-        <div class="imp-cell"><span class="ro-lab">ganancia</span><b>{verdict.gain.toFixed(2)}</b></div>
-        <div class="imp-cell"><span class="ro-lab">despl.</span><b>{verdict.amp.toFixed(1)}<span class="unit">°</span></b></div>
+        {#each verdict.checks as c (c.id)}
+          {@const dec = c.id === 'gain' || c.id === 'pose' ? 2 : c.id === 'amp' ? 1 : 0}
+          <div class="imp-cell" class:bad={!c.ok} title={`rango ${c.min}–${c.max}${c.unit ? ' ' + c.unit : ''}`}>
+            <span class="ro-lab">{c.label}</span>
+            <b>{c.value.toFixed(dec)}{#if c.unit}<span class="unit">{c.unit}</span>{/if}</b>
+            <span class="range muted">[{c.min}–{c.max}]</span>
+          </div>
+        {/each}
       </div>
-      {#if !verdict.ok}
-        <div class="reasons muted small">{verdict.reasons.join(' · ')}</div>
-      {/if}
     {/if}
   </div>
 
@@ -458,8 +460,10 @@
   .imp-cell { display: inline-flex; align-items: baseline; gap: 4px; font-family: ui-monospace, monospace; }
   .imp-cell .ro-lab { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
   .imp-cell b { font-size: 14px; font-weight: 700; }
+  .imp-cell.bad b { color: var(--danger); }
   .imp-cell .unit { font-size: 10px; color: var(--text-muted); margin-left: 1px; }
-  .reasons { margin-top: 4px; }
+  .imp-cell .range { font-size: 9px; }
+  .imp-row { flex-wrap: wrap; }
 
   .badge { padding: 1px 8px; border-radius: 999px; font-weight: 700; font-size: 11px; }
   .badge.ok  { background: var(--success); color: white; }

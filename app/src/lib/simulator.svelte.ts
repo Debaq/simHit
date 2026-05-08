@@ -45,24 +45,60 @@ function integrateAmplitude(t: Float64Array, head: Float64Array): number {
 
 // Heurística simple de aceptación de impulso. Rangos configurables vía
 // store `acceptance` (presets principiante / estándar / avanzado / custom).
-function evaluateImpulse(imp: Impulse, peakHead: number, gain: number) {
+export type CheckId = 'pose' | 'peak' | 'gain' | 'dur' | 'amp';
+export interface Check {
+  id: CheckId;
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  unit: string;
+  ok: boolean;
+}
+export interface Verdict {
+  ok: boolean;
+  reasons: string[];
+  peak: number;
+  gain: number;
+  amp: number;
+  durMs: number;
+  levelName: string;
+  checks: Check[];
+}
+
+function evaluateImpulse(
+  imp: Impulse, peakHead: number, gain: number,
+  pose0: { yaw: number; pitch: number; roll: number },
+): Verdict {
   const cfg = acceptance.active;
-  const reasons: string[] = [];
-  if (peakHead < cfg.peakMin || peakHead > cfg.peakMax) {
-    reasons.push(`pico ${peakHead.toFixed(0)} fuera de ${cfg.peakMin}–${cfg.peakMax} °/s`);
-  }
-  if (gain < cfg.gainMin || gain > cfg.gainMax) {
-    reasons.push(`ganancia ${gain.toFixed(2)} fuera de ${cfg.gainMin.toFixed(2)}–${cfg.gainMax.toFixed(2)}`);
-  }
   const durMs = imp.t.length ? imp.t[imp.t.length - 1] - imp.t[0] : 0;
-  if (durMs < cfg.durMinMs || durMs > cfg.durMaxMs) {
-    reasons.push(`duración ${durMs.toFixed(0)} fuera de ${cfg.durMinMs}–${cfg.durMaxMs} ms`);
-  }
   const amp = integrateAmplitude(imp.t, imp.head);
-  if (amp < cfg.ampMin || amp > cfg.ampMax) {
-    reasons.push(`despl. ${amp.toFixed(1)} fuera de ${cfg.ampMin}–${cfg.ampMax} °`);
-  }
-  return { ok: reasons.length === 0, reasons, peak: peakHead, gain, amp, levelName: cfg.name };
+  const poseErr = Math.max(
+    Math.abs(pose0.yaw)   / cfg.yawTol,
+    Math.abs(pose0.pitch) / cfg.pitchTol,
+    Math.abs(pose0.roll)  / cfg.rollTol,
+  );
+  const checks: Check[] = [
+    { id: 'pose', label: 'pose',     value: poseErr,  min: 0, max: 1, unit: '×tol',
+      ok: poseErr <= 1 },
+    { id: 'peak', label: 'pico',     value: peakHead, min: cfg.peakMin,   max: cfg.peakMax,   unit: '°/s',
+      ok: peakHead >= cfg.peakMin && peakHead <= cfg.peakMax },
+    { id: 'gain', label: 'ganancia', value: gain,     min: cfg.gainMin,   max: cfg.gainMax,   unit: '',
+      ok: gain >= cfg.gainMin && gain <= cfg.gainMax },
+    { id: 'dur',  label: 'duración', value: durMs,    min: cfg.durMinMs,  max: cfg.durMaxMs,  unit: 'ms',
+      ok: durMs >= cfg.durMinMs && durMs <= cfg.durMaxMs },
+    { id: 'amp',  label: 'despl.',   value: amp,      min: cfg.ampMin,    max: cfg.ampMax,    unit: '°',
+      ok: amp >= cfg.ampMin && amp <= cfg.ampMax },
+  ];
+  const fmt = (c: Check) => {
+    if (c.id === 'pose') {
+      return `pose inicial fuera de tolerancia (yaw ${pose0.yaw.toFixed(1)}° / pitch ${pose0.pitch.toFixed(1)}° / roll ${pose0.roll.toFixed(1)}°)`;
+    }
+    const dec = c.id === 'gain' ? 2 : c.id === 'amp' ? 1 : 0;
+    return `${c.label} ${c.value.toFixed(dec)} fuera de ${c.min}–${c.max}${c.unit ? ' ' + c.unit : ''}`;
+  };
+  const reasons = checks.filter((c) => !c.ok).map(fmt);
+  return { ok: reasons.length === 0, reasons, peak: peakHead, gain, amp, durMs, levelName: cfg.name, checks };
 }
 const WINDOW_S = 5;
 const N = FS * WINDOW_S;
@@ -100,7 +136,7 @@ class Simulator {
   headRoll = $state(0);   // °, neutro = 0; oreja-hombro izq < 0; der > 0
   // Veredicto del último impulso capturado
   lastImpulse = $state<Impulse | null>(null);
-  lastVerdict = $state<{ ok: boolean; reasons: string[]; peak: number; gain: number; amp: number; levelName: string } | null>(null);
+  lastVerdict = $state<Verdict | null>(null);
 
   // alias para no romper API previa
   get running() { return this.mode !== 'idle'; }
@@ -136,6 +172,9 @@ class Simulator {
     t: number[];
     head: number[];
     eye: number[];
+    poseYaw0: number;
+    posePitch0: number;
+    poseRoll0: number;
   } = null;
 
   connect() {
@@ -247,6 +286,9 @@ class Simulator {
       t: [],
       head: [],
       eye: [],
+      poseYaw0: this.headYaw,
+      posePitch0: this.headPitch,
+      poseRoll0: this.headRoll,
     };
 
     // disparar parpadeo si artefacto = blink
@@ -441,7 +483,12 @@ class Simulator {
             saccade: cfg.saccade,
             artifact,
           };
-          this.capturing = { side: channel, t: [], head: [], eye: [] };
+          this.capturing = {
+            side: channel, t: [], head: [], eye: [],
+            poseYaw0: this.headYaw,
+            posePitch0: this.headPitch,
+            poseRoll0: this.headRoll,
+          };
           if (artifact === 'blink') {
             setTimeout(() => this.runBlink(), 80 + Math.random() * 80);
           }
@@ -553,7 +600,9 @@ class Simulator {
     else this.impulsesRL = [...this.impulsesRL, imp].slice(-15);
     this.capturing = null;
     this.lastImpulse = imp;
-    this.lastVerdict = evaluateImpulse(imp, peakHead, gain);
+    this.lastVerdict = evaluateImpulse(imp, peakHead, gain, {
+      yaw: c.poseYaw0, pitch: c.posePitch0, roll: c.poseRoll0,
+    });
   }
 
   private scheduleNextRandom() {
