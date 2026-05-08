@@ -12,8 +12,9 @@
 //   eyesets/<setId>/meta.json
 //   eyesets/<setId>/frames/<frameId>.bin
 //
-// Builtin: usa sprite WebP (/eye/sprite.webp) con 12 sub-frames apilados.
-// Sus frames se exponen con spriteY (background-position-y %) en lugar de url.
+// Builtin: 36 frames JPG individuales en /eye/frames/<H>-<V>.jpg.
+//   centro 0-0, rayos cardinales y diagonales con magnitudes p1..p3 / n1..n3,
+//   parpadeo c-0..c-4. Render via `url`.
 
 import { storage } from './storage';
 import type { ArtifactConfig } from './scenario.svelte';
@@ -24,7 +25,8 @@ export type Frame = {
   id: string;
   pupilX: number;
   pupilY: number;
-  // Runtime: una de las dos. Custom usa `url` (blob), builtin usa `spriteY` (%).
+  // Runtime: builtin → url estática (/eye/frames/...); custom → url blob;
+  // legacy sprite WebP usa spriteY (% de background-position-y).
   url?: string;
   spriteY?: number;
 };
@@ -67,38 +69,38 @@ const LEGACY_OLD_PUPILS = 'simhit:eyeset:default';
 
 const BUILTIN_ID = 'builtin-default';
 
-// ── Builtin sprite layout (legacy 12 frames) ─────────────────────────────────
-// 0-2: izq extrema/media/leve, 3: centro, 4-6: der leve/media/extrema, 7-11: parpadeo
-const SPRITE_FRAMES = 12;
-const spriteY = (i: number) => (i / (SPRITE_FRAMES - 1)) * 100;
+// ── Builtin layout ───────────────────────────────────────────────────────────
+// Convención: nombre archivo `<V>-<H>.jpg` (primer token vertical, segundo horizontal).
+//   '0' = central; 'p1..p3' = positivo magnitud 1..3; 'n1..n3' = negativo.
+//   Set corresponde al OJO IZQUIERDO. n horizontal → paciente mira a su DERECHA
+//   (= nasal para ojo izq); p horizontal → paciente IZQUIERDA (temporal).
+//   p vertical → ARRIBA. c-0..c-4 = parpadeo.
+const SPRITE_FRAMES = 12; // sólo para legacy migration
+const FRAME_BASE = '/eye/frames';
+const mkFrame = (name: string): Frame => ({
+  id: `b-${name}`,
+  pupilX: 0,
+  pupilY: 0,
+  url: `${FRAME_BASE}/${name}.jpg`,
+});
 
 function makeBuiltin(): EyeSet {
   return {
     id: BUILTIN_ID,
     name: 'Por defecto',
     builtin: true,
-    spriteUrl: '/eye/sprite.webp',
-    centerFrame: { id: 'b-c', pupilX: 0, pupilY: 0, spriteY: spriteY(3) },
+    centerFrame: mkFrame('0-0'),
     rays: {
-      up: [], down: [], upLeft: [], upRight: [], downLeft: [], downRight: [],
-      left: [
-        { id: 'b-l-1', pupilX: 0, pupilY: 0, spriteY: spriteY(2) },
-        { id: 'b-l-2', pupilX: 0, pupilY: 0, spriteY: spriteY(1) },
-        { id: 'b-l-3', pupilX: 0, pupilY: 0, spriteY: spriteY(0) },
-      ],
-      right: [
-        { id: 'b-r-1', pupilX: 0, pupilY: 0, spriteY: spriteY(4) },
-        { id: 'b-r-2', pupilX: 0, pupilY: 0, spriteY: spriteY(5) },
-        { id: 'b-r-3', pupilX: 0, pupilY: 0, spriteY: spriteY(6) },
-      ],
+      right: ['0-n1', '0-n2', '0-n3'].map(mkFrame),
+      left: ['0-p1', '0-p2', '0-p3'].map(mkFrame),
+      up: ['p1-0', 'p2-0'].map(mkFrame),
+      down: ['n1-0', 'n2-0'].map(mkFrame),
+      upRight: ['p1-n1', 'p1-n2', 'p1-n3', 'p2-n1', 'p2-n2'].map(mkFrame),
+      upLeft: ['p1-p1', 'p1-p2', 'p1-p3', 'p2-p1', 'p2-p2'].map(mkFrame),
+      downRight: ['n1-n1', 'n1-n2', 'n1-n3', 'n2-n1', 'n2-n2'].map(mkFrame),
+      downLeft: ['n1-p1', 'n1-p2', 'n1-p3', 'n2-p1', 'n2-p2'].map(mkFrame),
     },
-    blink: [
-      { id: 'b-bk-0', pupilX: 0, pupilY: 0, spriteY: spriteY(7) },
-      { id: 'b-bk-1', pupilX: 0, pupilY: 0, spriteY: spriteY(8) },
-      { id: 'b-bk-2', pupilX: 0, pupilY: 0, spriteY: spriteY(9) },
-      { id: 'b-bk-3', pupilX: 0, pupilY: 0, spriteY: spriteY(10) },
-      { id: 'b-bk-4', pupilX: 0, pupilY: 0, spriteY: spriteY(11) },
-    ],
+    blink: ['c-0', 'c-1', 'c-2', 'c-3', 'c-4'].map(mkFrame),
     artifacts: [],
   };
 }

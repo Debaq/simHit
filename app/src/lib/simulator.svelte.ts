@@ -1,4 +1,5 @@
 import type { Scenario, ArtifactConfig, Channel, ChannelConfig } from '$lib/scenario.svelte';
+import { scenarios } from '$lib/scenario.svelte';
 import { eyeset } from '$lib/eyeset.svelte';
 import { serial } from '$lib/serial.svelte';
 import { acceptance } from '$lib/acceptance.svelte';
@@ -22,6 +23,15 @@ export type ImpulseTrigger = {
 
 const FS = 200;
 
+// Escala VOR para preview ocular.
+//   yaw  ±VOR_YAW_FULL°   → ±3 niveles horizontales (gaze x)
+//   pitch ±VOR_PITCH_FULL° → ±3 niveles verticales (gaze y, sentido invertido)
+// EyeView clampa y elige rayo cardinal o diagonal según ambos.
+const VOR_YAW_FULL = 25;
+const VOR_PITCH_FULL = 20;
+const yawToGaze = (yaw: number) => Math.max(-3, Math.min(3, -yaw * (3 / VOR_YAW_FULL)));
+const pitchToGaze = (p: number) => Math.max(-3, Math.min(3, -p * (3 / VOR_PITCH_FULL)));
+
 // Integra |velocidad| trapezoidalmente para obtener desplazamiento (°).
 function integrateAmplitude(t: Float64Array, head: Float64Array): number {
   if (t.length < 2) return 0;
@@ -38,17 +48,21 @@ function integrateAmplitude(t: Float64Array, head: Float64Array): number {
 function evaluateImpulse(imp: Impulse, peakHead: number, gain: number) {
   const cfg = acceptance.active;
   const reasons: string[] = [];
-  if (peakHead < cfg.peakMin) reasons.push(`pico bajo (<${cfg.peakMin}°/s)`);
-  if (peakHead > cfg.peakMax) reasons.push(`pico excesivo (>${cfg.peakMax}°/s)`);
-  if (gain < cfg.gainMin) reasons.push('ganancia muy baja');
-  if (gain > cfg.gainMax) reasons.push('ganancia anómala');
+  if (peakHead < cfg.peakMin || peakHead > cfg.peakMax) {
+    reasons.push(`pico ${peakHead.toFixed(0)} fuera de ${cfg.peakMin}–${cfg.peakMax} °/s`);
+  }
+  if (gain < cfg.gainMin || gain > cfg.gainMax) {
+    reasons.push(`ganancia ${gain.toFixed(2)} fuera de ${cfg.gainMin.toFixed(2)}–${cfg.gainMax.toFixed(2)}`);
+  }
   const durMs = imp.t.length ? imp.t[imp.t.length - 1] - imp.t[0] : 0;
-  if (durMs < cfg.durMinMs) reasons.push('duración corta');
-  if (durMs > cfg.durMaxMs) reasons.push('duración larga');
+  if (durMs < cfg.durMinMs || durMs > cfg.durMaxMs) {
+    reasons.push(`duración ${durMs.toFixed(0)} fuera de ${cfg.durMinMs}–${cfg.durMaxMs} ms`);
+  }
   const amp = integrateAmplitude(imp.t, imp.head);
-  if (amp < cfg.ampMin) reasons.push(`desplazamiento bajo (<${cfg.ampMin}°)`);
-  if (amp > cfg.ampMax) reasons.push(`desplazamiento alto (>${cfg.ampMax}°)`);
-  return { ok: reasons.length === 0, reasons, peak: peakHead, gain, amp };
+  if (amp < cfg.ampMin || amp > cfg.ampMax) {
+    reasons.push(`despl. ${amp.toFixed(1)} fuera de ${cfg.ampMin}–${cfg.ampMax} °`);
+  }
+  return { ok: reasons.length === 0, reasons, peak: peakHead, gain, amp, levelName: cfg.name };
 }
 const WINDOW_S = 5;
 const N = FS * WINDOW_S;
@@ -73,7 +87,9 @@ class Simulator {
   currentScenarioName = $state<string | null>(null);
   currentStep = $state<string | null>(null);
   gaze = $state(0);
+  gazeY = $state(0);
   blinkFrame = $state<number | null>(null);
+  blinkEnabled = $state(true);
   impulsesLL = $state<Impulse[]>([]);
   impulsesRL = $state<Impulse[]>([]);
   rev = $state(0);
@@ -84,7 +100,7 @@ class Simulator {
   headRoll = $state(0);   // °, neutro = 0; oreja-hombro izq < 0; der > 0
   // Veredicto del último impulso capturado
   lastImpulse = $state<Impulse | null>(null);
-  lastVerdict = $state<{ ok: boolean; reasons: string[]; peak: number; gain: number; amp: number } | null>(null);
+  lastVerdict = $state<{ ok: boolean; reasons: string[]; peak: number; gain: number; amp: number; levelName: string } | null>(null);
 
   // alias para no romper API previa
   get running() { return this.mode !== 'idle'; }
@@ -99,7 +115,6 @@ class Simulator {
   private nextImpulseMs = 0;
   private impulseId = 1;
   private cancelToken = 0;
-  private activeScenario: Scenario | null = null;
   private belowSinceMs: number | null = null;
 
   // Estado suavizado para el plot (decoupling del batching del serial USB).
@@ -163,7 +178,6 @@ class Simulator {
     this.resetBuffers();
     this.mode = 'scenario';
     this.currentScenarioName = scenario.name;
-    this.activeScenario = scenario;
     const token = ++this.cancelToken;
 
     if (serial.connected) {
@@ -177,11 +191,19 @@ class Simulator {
     while (token === this.cancelToken) {
       const side: 'L' | 'R' = Math.random() < 0.5 ? 'L' : 'R';
       const channel: Channel = side === 'L' ? 'LL' : 'RL';
-      const cfg = scenario.channels[channel];
+      // Lectura reactiva: si el docente cambia el escenario activo, el próximo
+      // impulso usa la nueva config sin reiniciar.
+      const sc = scenarios.active ?? scenario;
+      this.currentScenarioName = sc.name;
+      const cfg = sc.channels[channel];
+      // TEMP[issue#2]: jitter en gain/peak para variabilidad visible en overlay.
+      // Quitar cuando issue caso->demo defina variabilidad real.
+      const gainJitter = (Math.random() - 0.5) * 0.18;
+      const peakJitter = (Math.random() - 0.5) * 60;
       this.triggerImpulse({
         side,
-        gain: cfg.gain,
-        peakVel: cfg.peakVel,
+        gain: Math.max(0.1, Math.min(1.5, cfg.gain + gainJitter)),
+        peakVel: Math.max(60, cfg.peakVel + peakJitter),
         saccade: cfg.saccade,
         artifact: rollArtifact(resolveArtifacts(cfg)),
       });
@@ -195,9 +217,9 @@ class Simulator {
     this.mode = 'idle';
     this.currentStep = null;
     this.gaze = 0;
+    this.gazeY = 0;
     if (this.capturing) this.commitImpulse();
     this.impCfg = null;
-    this.activeScenario = null;
     this.belowSinceMs = null;
   }
 
@@ -251,6 +273,9 @@ class Simulator {
         this.headYaw = serial.poseYaw;
         this.headPitch = serial.posePitch;
         this.headRoll = serial.poseRoll;
+        // VOR en idle: ojo compensa pose de cabeza (gain=1).
+        this.gaze = yawToGaze(this.headYaw);
+        this.gazeY = pitchToGaze(this.headPitch);
       }
       return;
     }
@@ -402,7 +427,10 @@ class Simulator {
       if (this.mode === 'scenario' && !this.impCfg && Math.abs(head) > IMPULSE_START_THR) {
         const dir = head > 0 ? 1 : -1;
         const channel: Channel = dir < 0 ? 'LL' : 'RL';
-        const cfg = this.activeScenario?.channels[channel];
+        // Lectura reactiva del escenario activo en cada inicio de impulso.
+        const sc = scenarios.active;
+        if (sc) this.currentScenarioName = sc.name;
+        const cfg = sc?.channels[channel];
         if (cfg) {
           const artifact = rollArtifact(resolveArtifacts(cfg));
           this.impCfg = {
@@ -463,7 +491,8 @@ class Simulator {
 
       // Animación gaze
       const phase = elapsed / IMP_DURATION_MS;
-      this.gaze = (phase > 0 && phase < 1) ? -cfg.dir * 3 * Math.sin(Math.PI * phase) : 0;
+      this.gaze = (phase > 0 && phase < 1) ? -cfg.dir * 3 * Math.sin(Math.PI * phase) : yawToGaze(this.headYaw);
+      this.gazeY = pitchToGaze(this.headPitch);
 
       // Fin de impulso: bajo umbral sostenido o duración máxima
       const belowThr = Math.abs(head) < IMPULSE_END_THR;
@@ -480,7 +509,9 @@ class Simulator {
         this.belowSinceMs = null;
       }
     } else {
-      this.gaze = 0;
+      // Sin impulso pero con sensor: VOR continuo.
+      this.gaze = yawToGaze(this.headYaw);
+      this.gazeY = pitchToGaze(this.headPitch);
     }
 
     // Rotar buffers de plot una entrada por cada sample real recibido.
@@ -537,6 +568,7 @@ class Simulator {
 
   private runBlink() {
     if (!this.connected) return;
+    if (!this.blinkEnabled) { this.scheduleBlink(); return; }
     const seq = [0, 1, 2, 3, 4, 4, 3, 2, 1, 0];
     let i = 0;
     const step = () => {

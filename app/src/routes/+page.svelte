@@ -24,7 +24,7 @@
         <TraceChart title="Velocidad cabeza vs ojo (tiempo real)" />
       </div>
       <div class="eye">
-        <EyeView value={sim.gaze} blinkFrame={sim.blinkFrame} connected={sim.cameraOn} />
+        <EyeView value={sim.gaze} valueY={sim.gazeY} blinkFrame={sim.blinkFrame} connected={sim.cameraOn} />
       </div>
     </section>
 

@@ -1,14 +1,17 @@
 <script lang="ts">
   import { eyeset, type Frame } from '$lib/eyeset.svelte';
+  import { sim } from '$lib/simulator.svelte';
   import { onMount } from 'svelte';
 
   let {
     value = 0,
+    valueY = 0,
     blinkFrame = null,
     connected = true,
     showTracker = true,
   }: {
     value?: number;
+    valueY?: number;
     blinkFrame?: number | null;
     connected?: boolean;
     showTracker?: boolean;
@@ -18,7 +21,8 @@
 
   let active = $derived(eyeset.active);
 
-  // Selección de frame en función de value (eje horizontal -3..3) o blinkFrame
+  // Selección de frame en función de (value, valueY) en grilla -3..3 o blinkFrame.
+  // value > 0 → paciente derecha; valueY > 0 → arriba.
   let currentFrame = $derived.by<Frame | null>(() => {
     if (!connected || !active) return null;
     if (blinkFrame !== null && blinkFrame !== undefined) {
@@ -27,17 +31,18 @@
       const idx = Math.max(0, Math.min(arr.length - 1, Math.round(blinkFrame)));
       return arr[idx];
     }
-    const v = Math.max(-3, Math.min(3, value));
-    const r = Math.round(v);
-    if (r === 0) return active.centerFrame;
-    if (r > 0) {
-      const arr = active.rays.right;
-      if (arr.length === 0) return active.centerFrame;
-      return arr[Math.min(arr.length - 1, r - 1)];
-    }
-    const arr = active.rays.left;
+    const rx = Math.round(Math.max(-3, Math.min(3, value)));
+    const ry = Math.round(Math.max(-3, Math.min(3, valueY)));
+    if (rx === 0 && ry === 0) return active.centerFrame;
+    let rayKey: keyof typeof active.rays;
+    if (rx === 0) rayKey = ry > 0 ? 'up' : 'down';
+    else if (ry === 0) rayKey = rx > 0 ? 'right' : 'left';
+    else if (rx > 0) rayKey = ry > 0 ? 'upRight' : 'downRight';
+    else rayKey = ry > 0 ? 'upLeft' : 'downLeft';
+    const arr = active.rays[rayKey];
     if (arr.length === 0) return active.centerFrame;
-    return arr[Math.min(arr.length - 1, -r - 1)];
+    const mag = Math.max(Math.abs(rx), Math.abs(ry));
+    return arr[Math.min(arr.length - 1, mag - 1)];
   });
 
   let bgImage = $derived.by(() => {
@@ -76,7 +81,16 @@
       {/if}
     </div>
     <div class="meta">
-      <span>posición: <code>{value.toFixed(1)}</code></span>
+      <span>x: <code>{value.toFixed(1)}</code></span>
+      <span>y: <code>{valueY.toFixed(1)}</code></span>
+      {#if currentFrame}<span>frame: <code>{currentFrame.id}</code></span>{/if}
+      <button
+        type="button"
+        class="blink-toggle"
+        class:off={!sim.blinkEnabled}
+        onclick={() => (sim.blinkEnabled = !sim.blinkEnabled)}
+        title="Activar/desactivar parpadeo"
+      >Parpadeo: {sim.blinkEnabled ? 'ON' : 'OFF'}</button>
       <span class:on={connected} class="conn-dot">{connected ? 'conectado' : 'sin señal'}</span>
     </div>
   </div>
@@ -116,7 +130,13 @@
     filter: drop-shadow(0 0 1px rgba(0,0,0,0.6));
   }
   .tracker svg { width: 100%; height: 100%; }
-  .meta { display: flex; gap: 16px; align-items: center; font-size: 12px; color: var(--text-muted); }
+  .meta { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--text-muted); }
+  .blink-toggle {
+    border: 1px solid var(--border); background: var(--primary-soft); color: var(--primary);
+    padding: 2px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;
+    text-transform: uppercase; letter-spacing: .04em;
+  }
+  .blink-toggle.off { background: transparent; color: var(--text-muted); }
   code { background: var(--primary-soft); color: var(--primary); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
   .conn-dot { display: inline-flex; align-items: center; gap: 6px; text-transform: uppercase; letter-spacing: .04em; font-size: 10px; }
   .conn-dot::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; }
