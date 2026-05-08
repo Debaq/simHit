@@ -102,6 +102,14 @@
   let eyeShift = $derived(14 * Math.sin((yaw * Math.PI) / 180));
   let pitchA = $derived((-PITCH_TOL * Math.PI) / 180);
   let pitchB = $derived((PITCH_TOL * Math.PI) / 180);
+
+  // Banda amarilla: 1.5× la tolerancia (zona de advertencia)
+  const WARN_MULT = 1.5;
+  let YAW_WARN = $derived(YAW_TOL * WARN_MULT);
+  let PITCH_WARN = $derived(PITCH_TOL * WARN_MULT);
+  let ROLL_WARN = $derived(ROLL_TOL * WARN_MULT);
+  let pitchWA = $derived((-PITCH_WARN * Math.PI) / 180);
+  let pitchWB = $derived((PITCH_WARN * Math.PI) / 180);
 </script>
 
 <div class="live">
@@ -174,10 +182,17 @@
       <div class="view">
         <svg viewBox="-100 -90 200 180" class="dial" aria-label="Vista superior">
           <circle cx="0" cy="0" r="78" fill="var(--surface-2)" stroke="var(--border)" />
+          <!-- Banda roja: fuera de zona de advertencia -->
+          <circle cx="0" cy="0" r="78" fill="var(--danger)" opacity="0.10" />
+          <!-- Banda amarilla: ±1.5×YAW_TOL -->
+          <path
+            d={`M 0 0 L ${78 * Math.sin(-YAW_WARN * Math.PI / 180)} ${-78 * Math.cos(-YAW_WARN * Math.PI / 180)} A 78 78 0 0 1 ${78 * Math.sin(YAW_WARN * Math.PI / 180)} ${-78 * Math.cos(YAW_WARN * Math.PI / 180)} Z`}
+            fill="var(--warn)" opacity="0.22"
+          />
           <!-- Zona objetivo yaw (cono ±YAW_TOL hacia frente) -->
           <path
             d={`M 0 0 L ${78 * Math.sin(-YAW_TOL * Math.PI / 180)} ${-78 * Math.cos(-YAW_TOL * Math.PI / 180)} A 78 78 0 0 1 ${78 * Math.sin(YAW_TOL * Math.PI / 180)} ${-78 * Math.cos(YAW_TOL * Math.PI / 180)} Z`}
-            fill="var(--success)" opacity="0.18"
+            fill="var(--success)" opacity="0.32"
           />
           <!-- Ticks F/A/I/D -->
           {#each [{ a: 0, l: 'F' }, { a: 90, l: 'D' }, { a: 180, l: 'A' }, { a: -90, l: 'I' }] as t}
@@ -205,10 +220,17 @@
           <circle cx="0" cy="0" r="78" fill="var(--surface-2)" stroke="var(--border)" />
           <!-- Horizonte de referencia -->
           <line x1="-78" y1="0" x2="78" y2="0" stroke="var(--border-strong)" stroke-dasharray="3 3" />
+          <!-- Banda roja: fuera de zona de advertencia -->
+          <circle cx="0" cy="0" r="78" fill="var(--danger)" opacity="0.10" />
+          <!-- Banda amarilla: ±1.5×ROLL_TOL -->
+          <path
+            d={`M 0 0 L ${-78 * Math.sin(-ROLL_WARN * Math.PI / 180)} ${-78 * Math.cos(-ROLL_WARN * Math.PI / 180)} A 78 78 0 0 1 ${-78 * Math.sin(ROLL_WARN * Math.PI / 180)} ${-78 * Math.cos(ROLL_WARN * Math.PI / 180)} Z`}
+            fill="var(--warn)" opacity="0.22"
+          />
           <!-- Zona objetivo roll (cono ±ROLL_TOL desde vertical) -->
           <path
             d={`M 0 0 L ${-78 * Math.sin(-ROLL_TOL * Math.PI / 180)} ${-78 * Math.cos(-ROLL_TOL * Math.PI / 180)} A 78 78 0 0 1 ${-78 * Math.sin(ROLL_TOL * Math.PI / 180)} ${-78 * Math.cos(ROLL_TOL * Math.PI / 180)} Z`}
-            fill="var(--success)" opacity="0.16"
+            fill="var(--success)" opacity="0.32"
           />
           <!-- Cabeza vista frontal (coronal): solo rota con roll, sin distorsión por yaw -->
           <g transform="rotate({roll})">
@@ -235,10 +257,17 @@
         <svg viewBox="-100 -90 200 180" class="dial" aria-label="Vista lateral">
           <circle cx="0" cy="0" r="78" fill="var(--surface-2)" stroke="var(--border)" />
           <line x1="-78" y1="0" x2="78" y2="0" stroke="var(--border-strong)" stroke-dasharray="3 3" />
+          <!-- Banda roja: fuera de zona de advertencia -->
+          <circle cx="0" cy="0" r="78" fill="var(--danger)" opacity="0.10" />
+          <!-- Banda amarilla: ±1.5×PITCH_TOL -->
+          <path
+            d={`M 0 0 L ${78 * Math.cos(pitchWA)} ${78 * Math.sin(pitchWA)} A 78 78 0 0 1 ${78 * Math.cos(pitchWB)} ${78 * Math.sin(pitchWB)} Z`}
+            fill="var(--warn)" opacity="0.22"
+          />
           <!-- Zona objetivo pitch (sector ±PITCH_TOL desde horizontal-frente) -->
           <path
             d={`M 0 0 L ${78 * Math.cos(pitchA)} ${78 * Math.sin(pitchA)} A 78 78 0 0 1 ${78 * Math.cos(pitchB)} ${78 * Math.sin(pitchB)} Z`}
-            fill="var(--success)" opacity="0.16"
+            fill="var(--success)" opacity="0.32"
           />
           <!-- Perfil cabeza, rota con pitch -->
           <g transform="rotate({pitch})">

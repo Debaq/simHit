@@ -109,7 +109,7 @@
     if (!name) return;
     eyeset.createCustom(name);
   }
-  function duplicateActive() { if (active) eyeset.duplicate(active.id); }
+  async function duplicateActive() { if (active) await eyeset.duplicate(active.id); }
   async function removeActive() {
     if (!active || active.builtin) return;
     if (await ui.confirm(`Eliminar set "${active.name}"`, 'Esta acción no se puede deshacer.', { danger: true })) eyeset.remove(active.id);

@@ -376,7 +376,7 @@ class EyeSetStore {
     return s;
   }
 
-  duplicate(id: string): EyeSet | null {
+  async duplicate(id: string): Promise<EyeSet | null> {
     const src = this.sets.find((x) => x.id === id);
     if (!src) return null;
     const copy: EyeSet = {
@@ -393,11 +393,17 @@ class EyeSetStore {
     }
     copy.blink = src.blink.map((f) => ({ ...f, id: crypto.randomUUID(), url: undefined }));
 
+    // Copiar bytes ANTES de exponer el set para evitar render con thumbnails vacíos.
+    try {
+      await this.copyBinaries(src, copy);
+    } catch (e) {
+      console.warn('duplicate copyBinaries falló', e);
+    }
+    await this.persistMeta(copy);
+
     this.sets = [...this.sets, copy];
     this.activeId = copy.id;
     try { localStorage.setItem(KEY_ACTIVE, copy.id); } catch {}
-    void this.persistMeta(copy);
-    if (!src.builtin) void this.copyBinaries(src, copy);
     return copy;
   }
 
@@ -410,13 +416,23 @@ class EyeSetStore {
     src.blink.forEach((f, i) => pairs.push([f, dst.blink[i] ?? null]));
     for (const [a, b] of pairs) {
       if (!a || !b) continue;
-      const bin = await storage.readBinary(`${EYESETS_DIR}/${src.id}/frames/${a.id}.bin`);
+      let bin: Uint8Array | null = null;
+      if (src.builtin) {
+        // Builtin usa URLs estáticas; fetch para obtener bytes.
+        if (!a.url) continue;
+        try {
+          const res = await fetch(a.url);
+          if (!res.ok) { console.warn('duplicate fetch fail', a.url, res.status); continue; }
+          bin = new Uint8Array(await res.arrayBuffer());
+        } catch (e) { console.warn('duplicate fetch err', a.url, e); continue; }
+      } else {
+        bin = await storage.readBinary(`${EYESETS_DIR}/${src.id}/frames/${a.id}.bin`);
+      }
       if (!bin) continue;
       await storage.writeBinary(`${EYESETS_DIR}/${dst.id}/frames/${b.id}.bin`, bin);
-      const url = await storage.readAsBlobUrl(`${EYESETS_DIR}/${dst.id}/frames/${b.id}.bin`, '');
+      const url = await storage.readAsBlobUrl(`${EYESETS_DIR}/${dst.id}/frames/${b.id}.bin`, 'image/jpeg');
       if (url) b.url = url;
     }
-    this.sets = [...this.sets];
   }
 
   remove(id: string) {
