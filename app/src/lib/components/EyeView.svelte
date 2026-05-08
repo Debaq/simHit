@@ -1,6 +1,7 @@
 <script lang="ts">
   import { eyeset, type Frame } from '$lib/eyeset.svelte';
   import { sim } from '$lib/simulator.svelte';
+  import { settings } from '$lib/settings.svelte';
   import { onMount } from 'svelte';
 
   let {
@@ -17,7 +18,10 @@
     showTracker?: boolean;
   } = $props();
 
-  onMount(() => eyeset.load());
+  onMount(() => {
+    eyeset.load();
+    settings.load();
+  });
 
   let active = $derived(eyeset.active);
 
@@ -81,16 +85,18 @@
       {/if}
     </div>
     <div class="meta">
-      <span>x: <code>{value.toFixed(1)}</code></span>
-      <span>y: <code>{valueY.toFixed(1)}</code></span>
-      {#if currentFrame}<span>frame: <code>{currentFrame.id}</code></span>{/if}
-      <button
-        type="button"
-        class="blink-toggle"
-        class:off={!sim.blinkEnabled}
-        onclick={() => (sim.blinkEnabled = !sim.blinkEnabled)}
-        title="Activar/desactivar parpadeo"
-      >Parpadeo: {sim.blinkEnabled ? 'ON' : 'OFF'}</button>
+      {#if settings.debug}
+        <span>x: <code>{value.toFixed(1)}</code></span>
+        <span>y: <code>{valueY.toFixed(1)}</code></span>
+        {#if currentFrame}<span>frame: <code>{currentFrame.id}</code></span>{/if}
+        <button
+          type="button"
+          class="blink-toggle"
+          class:off={!sim.blinkEnabled}
+          onclick={() => (sim.blinkEnabled = !sim.blinkEnabled)}
+          title="Activar/desactivar parpadeo"
+        >Parpadeo: {sim.blinkEnabled ? 'ON' : 'OFF'}</button>
+      {/if}
       <span class:on={connected} class="conn-dot">{connected ? 'conectado' : 'sin señal'}</span>
     </div>
   </div>

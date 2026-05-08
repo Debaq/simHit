@@ -5,10 +5,12 @@
   import { scenarios } from '$lib/scenario.svelte';
   import { acceptance } from '$lib/acceptance.svelte';
   import { eyeset } from '$lib/eyeset.svelte';
+  import { settings } from '$lib/settings.svelte';
   import { ui } from '$lib/dialog.svelte';
 
   onMount(async () => {
     await scenarios.load();
+    await settings.load();
     if (bundles.active) bundles.applyActive();
   });
 
@@ -75,6 +77,19 @@
           <li class="empty-li">— sin escenarios —</li>
         {/each}
       </ul>
+
+      <div class="section-title">Configuración general</div>
+      <label class="cfg-row">
+        <input
+          type="checkbox"
+          checked={settings.debug}
+          onchange={(e) => settings.setDebug((e.currentTarget as HTMLInputElement).checked)}
+        />
+        <span class="cfg-label">
+          <b>Debug</b>
+          <em>Muestra x, y, frame y parpadeo sobre la imagen del ojo.</em>
+        </span>
+      </label>
     </aside>
 
     <main class="canvas">
@@ -275,4 +290,11 @@
   }
   .muted { color: var(--text-muted); font-size: 12px; margin: 0; }
   .small { font-size: 11px; }
+  .cfg-row {
+    display: flex; gap: 8px; align-items: flex-start; padding: 6px 4px; cursor: pointer;
+    font-size: 12px;
+  }
+  .cfg-row input[type=checkbox] { margin-top: 2px; }
+  .cfg-label { display: flex; flex-direction: column; gap: 2px; }
+  .cfg-label em { font-style: normal; color: var(--text-muted); font-size: 11px; }
 </style>
