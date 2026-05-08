@@ -1,7 +1,11 @@
 <script lang="ts">
   import { sim } from '$lib/simulator.svelte';
 
-  let { side = 'LL', label = 'Lateral Izquierdo' }: { side?: 'LL' | 'RL'; label?: string } = $props();
+  let { side = 'LL', label = 'Lateral Izquierdo', onEdit }: {
+    side?: 'LL' | 'RL';
+    label?: string;
+    onEdit?: (s: 'LL' | 'RL') => void;
+  } = $props();
 
   const W = 280;
   const H = 160;
@@ -17,7 +21,8 @@
   let sideColor = $derived(side === 'LL' ? 'var(--side-ll)' : 'var(--side-rl)');
 
   let impulses = $derived(side === 'LL' ? sim.impulsesLL : sim.impulsesRL);
-  let gain = $derived(impulses.length === 0 ? 0 : impulses.reduce((a, i) => a + i.gain, 0) / impulses.length);
+  let included = $derived(impulses.filter((i) => !sim.excludedIds.has(i.id)));
+  let gain = $derived(included.length === 0 ? 0 : included.reduce((a, i) => a + i.gain, 0) / included.length);
   let gainColor = $derived(gain >= 0.8 ? 'var(--success)' : gain >= 0.6 ? 'var(--warn)' : 'var(--danger)');
 
   function xScale(t: number) {
@@ -41,11 +46,22 @@
 <div class="card impulse" style:--side={sideColor}>
   <div class="card-title">
     <span class="side-tag">{side}</span> {label}
-    <span class="count">{impulses.length}</span>
+    <span class="count" title={impulses.length !== included.length ? `${included.length} incluidos / ${impulses.length} totales` : ''}>
+      {included.length}{impulses.length !== included.length ? `/${impulses.length}` : ''}
+    </span>
     <span class="gain" style:color={gainColor} title="Ganancia VOR media">
       <span class="gain-lab">gain</span>
-      <b>{impulses.length ? gain.toFixed(2) : '—'}</b>
+      <b>{included.length ? gain.toFixed(2) : '—'}</b>
     </span>
+    {#if onEdit}
+      <button
+        class="edit-btn"
+        title="Editar curvas (excluir / eliminar)"
+        aria-label="Editar curvas"
+        disabled={impulses.length === 0}
+        onclick={() => onEdit?.(side)}
+      ><span class="edit-ico">✎</span> Editar</button>
+    {/if}
     <span class="legend">
       <span><i class="solid"></i><b>Cabeza</b></span>
       <span><i class="dashed"></i><b>Ojo</b></span>
@@ -68,8 +84,9 @@
       {/each}
 
       {#each impulses as imp (imp.id)}
-        <path d={pathFor(imp.t, imp.head, flip)} fill="none" stroke={sideColor} stroke-width="1.6" opacity="0.55" />
-        <path d={pathFor(imp.t, imp.eye, flip)} fill="none" stroke={sideColor} stroke-width="1.2" opacity="0.7" stroke-dasharray="3 2" />
+        {@const excl = sim.excludedIds.has(imp.id)}
+        <path d={pathFor(imp.t, imp.head, flip)} fill="none" stroke={sideColor} stroke-width="1.6" opacity={excl ? 0.15 : 0.55} stroke-dasharray={excl ? '3 3' : ''} />
+        <path d={pathFor(imp.t, imp.eye, flip)} fill="none" stroke={sideColor} stroke-width="1.2" opacity={excl ? 0.2 : 0.7} stroke-dasharray="3 2" />
       {/each}
 
       {#if impulses.length === 0}
@@ -115,4 +132,13 @@
     display: inline-block;
   }
   .legend i.dashed { border-top-style: dashed; }
+  .edit-btn {
+    border: 1px solid var(--primary); background: var(--primary-soft);
+    color: var(--primary); padding: 4px 10px; font-size: 12px; font-weight: 600;
+    border-radius: var(--radius-sm); cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .edit-btn .edit-ico { font-size: 14px; line-height: 1; }
+  .edit-btn:hover:not(:disabled) { background: var(--primary); color: white; }
+  .edit-btn:disabled { opacity: .4; cursor: not-allowed; }
 </style>

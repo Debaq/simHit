@@ -128,6 +128,7 @@ class Simulator {
   blinkEnabled = $state(true);
   impulsesLL = $state<Impulse[]>([]);
   impulsesRL = $state<Impulse[]>([]);
+  excludedIds = $state<Set<number>>(new Set());
   rev = $state(0);
 
   // Pose simulada de la cabeza (mock — luego vendrá del firmware)
@@ -265,7 +266,27 @@ class Simulator {
   clearImpulses() {
     this.impulsesLL = [];
     this.impulsesRL = [];
+    this.excludedIds = new Set();
   }
+
+  toggleExclude(id: number) {
+    const next = new Set(this.excludedIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    this.excludedIds = next;
+  }
+
+  deleteImpulse(id: number) {
+    this.impulsesLL = this.impulsesLL.filter((i) => i.id !== id);
+    this.impulsesRL = this.impulsesRL.filter((i) => i.id !== id);
+    if (this.excludedIds.has(id)) {
+      const next = new Set(this.excludedIds);
+      next.delete(id);
+      this.excludedIds = next;
+    }
+  }
+
+  includedLL() { return this.impulsesLL.filter((i) => !this.excludedIds.has(i.id)); }
+  includedRL() { return this.impulsesRL.filter((i) => !this.excludedIds.has(i.id)); }
 
   triggerImpulse(opts: ImpulseTrigger) {
     if (!this.connected) return;

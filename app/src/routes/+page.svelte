@@ -5,14 +5,36 @@
   import TraceChart from '$lib/components/TraceChart.svelte';
   import ImpulseChart from '$lib/components/ImpulseChart.svelte';
   import ResultsPanel from '$lib/components/ResultsPanel.svelte';
+  import ImpulseModal from '$lib/components/ImpulseModal.svelte';
   import { sim } from '$lib/simulator.svelte';
   import { scenarios } from '$lib/scenario.svelte';
+  import type { ImpulseSnapshot, Side } from '$lib/report.svelte';
 
   onMount(() => {
     scenarios.load();
     sim.connect();
   });
   onDestroy(() => sim.disconnect());
+
+  let editorOpen = $state(false);
+  let editorSide = $state<Side>('LL');
+  function openEditor(s: Side) { editorSide = s; editorOpen = true; }
+
+  const EDITOR_CHANNELS: { id: Side; label: string }[] = [
+    { id: 'LL', label: 'Lateral izquierdo' },
+    { id: 'RL', label: 'Lateral derecho' },
+  ];
+  function editorImpulsesBy(s: Side): ImpulseSnapshot[] {
+    const arr = s === 'LL' ? sim.impulsesLL : sim.impulsesRL;
+    return arr.map((i) => ({
+      id: i.id,
+      side: i.side,
+      t: Array.from(i.t),
+      head: Array.from(i.head),
+      eye: Array.from(i.eye),
+      gain: i.gain,
+    }));
+  }
 </script>
 
 <div class="app">
@@ -29,12 +51,24 @@
     </section>
 
     <section class="row bottom">
-      <ImpulseChart side="LL" label="Lateral Izquierdo" />
+      <ImpulseChart side="LL" label="Lateral Izquierdo" onEdit={openEditor} />
       <ResultsPanel />
-      <ImpulseChart side="RL" label="Lateral Derecho" />
+      <ImpulseChart side="RL" label="Lateral Derecho" onEdit={openEditor} />
     </section>
   </main>
 </div>
+
+<ImpulseModal
+  open={editorOpen}
+  side={editorSide}
+  channels={EDITOR_CHANNELS}
+  impulsesBy={editorImpulsesBy}
+  excluded={sim.excludedIds}
+  onToggleExclude={(id) => sim.toggleExclude(id)}
+  onDelete={(id) => sim.deleteImpulse(id)}
+  onClose={() => (editorOpen = false)}
+  onChangeSide={(s) => (editorSide = s)}
+/>
 
 <style>
   .app {

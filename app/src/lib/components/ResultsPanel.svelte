@@ -22,16 +22,31 @@
     if (v.ok) audio.beepOk(); else audio.beepError();
   });
 
+  // Mínimo de impulsos válidos por lado para habilitar 'Generar informe'.
+  // Subir aquí cuando se quiera endurecer la regla (ej. 3 ó 5).
+  const MIN_IMPULSES_PER_SIDE = 1;
+
+  let includedLL = $derived(sim.impulsesLL.filter((i) => !sim.excludedIds.has(i.id)));
+  let includedRL = $derived(sim.impulsesRL.filter((i) => !sim.excludedIds.has(i.id)));
   let gainLL = $derived(
-    sim.impulsesLL.length === 0
-      ? 0
-      : sim.impulsesLL.reduce((a, i) => a + i.gain, 0) / sim.impulsesLL.length
+    includedLL.length === 0 ? 0 : includedLL.reduce((a, i) => a + i.gain, 0) / includedLL.length
   );
   let gainRL = $derived(
-    sim.impulsesRL.length === 0
-      ? 0
-      : sim.impulsesRL.reduce((a, i) => a + i.gain, 0) / sim.impulsesRL.length
+    includedRL.length === 0 ? 0 : includedRL.reduce((a, i) => a + i.gain, 0) / includedRL.length
   );
+
+  let canGenerate = $derived(
+    includedLL.length >= MIN_IMPULSES_PER_SIDE && includedRL.length >= MIN_IMPULSES_PER_SIDE
+  );
+  let generateTooltip = $derived.by(() => {
+    const missLL = MIN_IMPULSES_PER_SIDE - includedLL.length;
+    const missRL = MIN_IMPULSES_PER_SIDE - includedRL.length;
+    if (missLL > 0 && missRL > 0) return `Faltan ${missLL} impulso(s) izq. y ${missRL} der.`;
+    if (missLL > 0) return `Falta${missLL > 1 ? 'n' : ''} ${missLL} impulso(s) del lado izquierdo`;
+    if (missRL > 0) return `Falta${missRL > 1 ? 'n' : ''} ${missRL} impulso(s) del lado derecho`;
+    return '';
+  });
+
 
   function runScenario() {
     if (scenarios.active) sim.runScenario(scenarios.active);
@@ -40,7 +55,8 @@
   let examList = $derived([...scenarios.examples, ...scenarios.list]);
 
   function snapshotImpulses(): ImpulseSnapshot[] {
-    const all = [...sim.impulsesLL, ...sim.impulsesRL];
+    // Solo incluidos: los excluidos en captura no se llevan al informe.
+    const all = [...includedLL, ...includedRL];
     return all.map((i) => ({
       id: i.id,
       side: i.side,
@@ -52,8 +68,8 @@
   }
 
   async function generateReport() {
-    if (sim.impulsesLL.length + sim.impulsesRL.length === 0) {
-      await ui.alert('Sin impulsos', 'Realiza un examen antes de generar el informe.');
+    if (!canGenerate) {
+      await ui.alert('Faltan impulsos', generateTooltip || `Se requieren al menos ${MIN_IMPULSES_PER_SIDE} impulso(s) por lado.`);
       return;
     }
     if (sim.mode !== 'idle') {
@@ -80,8 +96,8 @@
       impulses: snapshotImpulses(),
       gainLL: gainLL,
       gainRL: gainRL,
-      countLL: sim.impulsesLL.length,
-      countRL: sim.impulsesRL.length,
+      countLL: includedLL.length,
+      countRL: includedRL.length,
       findings: emptyFindings(),
       interpretation: '',
       diagnosis: '',
@@ -133,7 +149,8 @@
       >Limpiar</button>
       <button
         class="primary"
-        disabled={sim.impulsesLL.length + sim.impulsesRL.length === 0}
+        disabled={!canGenerate}
+        title={canGenerate ? '' : generateTooltip}
         onclick={generateReport}
       >
         📄 Generar informe

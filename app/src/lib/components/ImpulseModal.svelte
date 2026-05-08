@@ -10,13 +10,20 @@
     impulsesBy: (side: Side) => ImpulseSnapshot[];
     onClose: () => void;
     onChangeSide: (s: Side) => void;
+    /** Set de ids excluidos controlado externamente (opcional). Si se omite, el modal usa estado local. */
+    excluded?: Set<number>;
+    /** Si se entrega, sustituye el toggle interno y propaga el cambio al contenedor. */
+    onToggleExclude?: (id: number) => void;
+    /** Si se entrega, habilita botón de eliminar definitivo en cada fila. */
+    onDelete?: (id: number) => void;
   };
 
-  let { open, side, channels, impulsesBy, onClose, onChangeSide }: Props = $props();
+  let { open, side, channels, impulsesBy, onClose, onChangeSide, excluded: excludedProp, onToggleExclude, onDelete }: Props = $props();
 
   let focusedId = $state<number | null>(null);
   let hoveredId = $state<number | null>(null);
-  let excluded = $state<Set<number>>(new Set());
+  let excludedLocal = $state<Set<number>>(new Set());
+  let excluded = $derived(excludedProp ?? excludedLocal);
   let mode = $state<'single' | 'overlay'>('single');
   let tWindow = $state<[number, number]>([-50, 250]);
   let normalize = $state(false);
@@ -82,9 +89,15 @@
   }
 
   function toggleExclude(id: number) {
-    const next = new Set(excluded);
+    if (onToggleExclude) { onToggleExclude(id); return; }
+    const next = new Set(excludedLocal);
     if (next.has(id)) next.delete(id); else next.add(id);
-    excluded = next;
+    excludedLocal = next;
+  }
+  function deleteImpulse(id: number) {
+    if (!onDelete) return;
+    onDelete(id);
+    if (focusedId === id) focusedId = null;
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -154,6 +167,14 @@
                 title={excluded.has(imp.id) ? 'Incluir' : 'Excluir del cálculo'}
                 onclick={() => toggleExclude(imp.id)}
               >{excluded.has(imp.id) ? '⊕' : '⊖'}</button>
+              {#if onDelete}
+                <button
+                  class="del-btn"
+                  title="Eliminar definitivamente"
+                  aria-label="Eliminar impulso"
+                  onclick={() => deleteImpulse(imp.id)}
+                >🗑</button>
+              {/if}
             </div>
           {/each}
         </aside>
@@ -349,7 +370,7 @@
   }
   .empty { padding: 16px; color: var(--text-muted); font-size: 12px; }
   .trial {
-    display: grid; grid-template-columns: 1fr auto; align-items: stretch;
+    display: grid; grid-template-columns: 1fr auto auto; align-items: stretch;
     border-bottom: 1px solid var(--border);
   }
   .trial.focused { background: var(--primary-soft); }
@@ -372,7 +393,12 @@
     border: none; background: transparent; cursor: pointer;
     font-size: 14px; padding: 0 10px; color: var(--text-muted);
   }
-  .excl-btn:hover { background: var(--danger); color: white; }
+  .excl-btn:hover { background: var(--warn); color: white; }
+  .del-btn {
+    border: none; background: transparent; cursor: pointer;
+    font-size: 13px; padding: 0 10px; color: var(--text-muted);
+  }
+  .del-btn:hover { background: var(--danger); color: white; }
 
   .main {
     display: flex; flex-direction: column;
