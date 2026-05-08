@@ -69,7 +69,7 @@ jobs:
       - name: Empaquetar binario Linux
         if: matrix.os == 'ubuntu-22.04'
         run: |
-          cp app/src-tauri/target/release/app simhit-${{ github.ref_name }}-linux-x86_64
+          cp app/src-tauri/target/release/simhit simhit-${{ github.ref_name }}-linux-x86_64
           chmod +x simhit-${{ github.ref_name }}-linux-x86_64
 
       - name: Renombrar instalador Windows
