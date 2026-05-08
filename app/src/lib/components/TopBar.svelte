@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { sim } from '$lib/simulator.svelte';
   import { serial } from '$lib/serial.svelte';
@@ -24,13 +25,13 @@
   function onHeaderMouseDown(e: MouseEvent) {
     if (e.button !== 0) return;
     const t = e.target as HTMLElement;
-    if (t.closest('button, a, select, input, textarea, .winctrls, .nav')) return;
+    if (t.closest('button, a, select, input, textarea, .winctrls, .brand')) return;
     e.preventDefault();
     appWindow.startDragging();
   }
   function onHeaderDblClick(e: MouseEvent) {
     const t = e.target as HTMLElement;
-    if (t.closest('button, a, select, input, textarea, .winctrls, .nav')) return;
+    if (t.closest('button, a, select, input, textarea, .winctrls, .brand')) return;
     appWindow.toggleMaximize();
   }
 
@@ -185,15 +186,22 @@
   onmousedown={onHeaderMouseDown}
   ondblclick={onHeaderDblClick}
 >
-  <a class="brand" href="/" aria-label="SimHIT inicio">
+  <div
+    class="brand"
+    role="button"
+    tabindex="0"
+    aria-label="SimHIT inicio"
+    onclick={() => goto('/')}
+    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goto('/'); } }}
+  >
     <img src="/brand/logo-sm.png" alt="" class="logo" />
     <div>
       <div class="title">SimHIT</div>
       <div class="subtitle">Pruebas vHIT</div>
     </div>
-  </a>
+  </div>
 
-  <nav class="nav">
+  <nav class="nav" data-tauri-drag-region>
     <a href="/" class:active={path === '/'}>Pruebas</a>
     <a href="/informe" class:active={path?.startsWith('/informe')}>Informes</a>
     <a href="/docente" class:active={path === '/docente'}>Modo docente</a>
@@ -506,6 +514,7 @@
     padding: 4px 8px; border-radius: var(--radius-sm);
     transition: background .15s;
   }
+  .brand { cursor: pointer; user-select: none; }
   .brand:hover { background: var(--primary-soft); }
   .logo { width: 36px; height: 36px; object-fit: contain; }
   .title { font-weight: 700; font-size: 16px; line-height: 1; letter-spacing: .04em; }
