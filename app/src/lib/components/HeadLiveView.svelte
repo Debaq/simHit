@@ -103,8 +103,8 @@
   let pitchA = $derived((-PITCH_TOL * Math.PI) / 180);
   let pitchB = $derived((PITCH_TOL * Math.PI) / 180);
 
-  // Banda amarilla: 1.5× la tolerancia (zona de advertencia)
-  const WARN_MULT = 1.5;
+  // Banda amarilla: 2× la tolerancia (zona de advertencia)
+  const WARN_MULT = 2;
   let YAW_WARN = $derived(YAW_TOL * WARN_MULT);
   let PITCH_WARN = $derived(PITCH_TOL * WARN_MULT);
   let ROLL_WARN = $derived(ROLL_TOL * WARN_MULT);
@@ -180,113 +180,126 @@
     <div class="pose-body">
       <!-- Vista superior: axial — yaw como rotación de la cabeza vista desde arriba -->
       <div class="view">
-        <svg viewBox="-100 -90 200 180" class="dial" aria-label="Vista superior">
-          <circle cx="0" cy="0" r="78" fill="var(--surface-2)" stroke="var(--border)" />
+        <svg viewBox="-100 -98 200 108" class="dial" aria-label="Vista superior">
+          <!-- Semianillo superior: rango ±90° (frente arriba) -->
+          <path d="M -90 0 A 90 90 0 0 1 90 0 Z" fill="var(--surface-2)" stroke="var(--border)" />
           <!-- Banda roja: fuera de zona de advertencia -->
-          <circle cx="0" cy="0" r="78" fill="var(--danger)" opacity="0.10" />
+          <path d="M -90 0 A 90 90 0 0 1 90 0 Z" fill="var(--danger)" opacity="0.10" />
           <!-- Banda amarilla: ±1.5×YAW_TOL -->
           <path
-            d={`M 0 0 L ${78 * Math.sin(-YAW_WARN * Math.PI / 180)} ${-78 * Math.cos(-YAW_WARN * Math.PI / 180)} A 78 78 0 0 1 ${78 * Math.sin(YAW_WARN * Math.PI / 180)} ${-78 * Math.cos(YAW_WARN * Math.PI / 180)} Z`}
-            fill="var(--warn)" opacity="0.22"
+            d={`M 0 0 L ${90 * Math.sin(-YAW_WARN * Math.PI / 180)} ${-90 * Math.cos(-YAW_WARN * Math.PI / 180)} A 90 90 0 0 1 ${90 * Math.sin(YAW_WARN * Math.PI / 180)} ${-90 * Math.cos(YAW_WARN * Math.PI / 180)} Z`}
+            fill="#facc15"
           />
           <!-- Zona objetivo yaw (cono ±YAW_TOL hacia frente) -->
           <path
-            d={`M 0 0 L ${78 * Math.sin(-YAW_TOL * Math.PI / 180)} ${-78 * Math.cos(-YAW_TOL * Math.PI / 180)} A 78 78 0 0 1 ${78 * Math.sin(YAW_TOL * Math.PI / 180)} ${-78 * Math.cos(YAW_TOL * Math.PI / 180)} Z`}
-            fill="var(--success)" opacity="0.32"
+            d={`M 0 0 L ${90 * Math.sin(-YAW_TOL * Math.PI / 180)} ${-90 * Math.cos(-YAW_TOL * Math.PI / 180)} A 90 90 0 0 1 ${90 * Math.sin(YAW_TOL * Math.PI / 180)} ${-90 * Math.cos(YAW_TOL * Math.PI / 180)} Z`}
+            fill="#22c55e"
           />
-          <!-- Ticks F/A/I/D -->
-          {#each [{ a: 0, l: 'F' }, { a: 90, l: 'D' }, { a: 180, l: 'A' }, { a: -90, l: 'I' }] as t}
-            <text x={92 * Math.sin((t.a * Math.PI) / 180)} y={-92 * Math.cos((t.a * Math.PI) / 180) + 3}
-                  text-anchor="middle" font-size="9" fill="var(--text-muted)">{t.l}</text>
+          <!-- Ticks F/I/D (rango ±90°) -->
+          {#each [{ a: 0, l: 'F' }, { a: 90, l: 'D' }, { a: -90, l: 'I' }] as t}
+            <text x={96 * Math.sin((t.a * Math.PI) / 180)} y={-96 * Math.cos((t.a * Math.PI) / 180) + 3}
+                  text-anchor="middle" font-size="11" fill="var(--text-muted)">{t.l}</text>
           {/each}
-          <!-- Cabeza vista superior, rota con yaw -->
+          <!-- Cabeza vista superior, rota con yaw — sin ojos, con orejas laterales -->
           <g transform="rotate({yaw})">
-            <ellipse cx="0" cy="0" rx="32" ry="42" fill="var(--surface)" stroke="var(--head-color)" stroke-width="2" />
-            <path d="M -7 -42 Q 0 -54 7 -42 Z" fill="var(--head-color)" />
-            <circle cx="-12" cy="-18" r="3.2" fill="var(--accent)" />
-            <circle cx="12" cy="-18" r="3.2" fill="var(--accent)" />
-            <line x1="0" y1="-42" x2="0" y2="-72" stroke={Math.abs(yaw) <= YAW_TOL ? 'var(--success)' : 'var(--warn)'} stroke-width="2" stroke-dasharray="3 3" />
+            <line x1="0" y1="-50" x2="0" y2="-86" stroke="#000" stroke-width="3.5" stroke-linecap="round" />
+            <ellipse cx="0" cy="0" rx="38" ry="50" fill="var(--surface)" stroke="var(--head-color)" stroke-width="2" />
+            <!-- nariz al frente -->
+            <path d="M -8 -50 Q 0 -64 8 -50 Z" fill="var(--head-color)" />
+            <!-- orejas a los costados -->
+            <ellipse cx="-38" cy="0" rx="4" ry="10" fill="var(--head-color)" opacity="0.7" />
+            <ellipse cx="38" cy="0" rx="4" ry="10" fill="var(--head-color)" opacity="0.7" />
           </g>
           <line x1="-3" y1="0" x2="3" y2="0" stroke="var(--text-muted)" />
-          <line x1="0" y1="-3" x2="0" y2="3" stroke="var(--text-muted)" />
-          <text x="-78" y="-78" font-size="9" fill="var(--text-muted)">SUPERIOR</text>
+          <line x1="0" y1="-3" x2="0" y2="0" stroke="var(--text-muted)" />
+          <text x="-92" y="-86" font-size="9" fill="var(--text-muted)">SUPERIOR</text>
+          {#if Math.abs(yaw) > YAW_WARN}
+            <g class="calibra">
+              <rect x="-70" y="-22" width="140" height="28" rx="4" fill="var(--danger)" />
+              <text x="0" y="-2" text-anchor="middle" font-size="20" font-weight="900" fill="white">CALIBRA!!!</text>
+            </g>
+          {/if}
         </svg>
         <div class="view-cap">yaw</div>
       </div>
 
-      <!-- Vista coronal: frente del paciente (yaw como giro, roll como inclinación) -->
+      <!-- Vista coronal: frente del paciente (roll como inclinación) -->
       <div class="view">
-        <svg viewBox="-100 -90 200 180" class="dial" aria-label="Vista coronal">
-          <circle cx="0" cy="0" r="78" fill="var(--surface-2)" stroke="var(--border)" />
-          <!-- Horizonte de referencia -->
-          <line x1="-78" y1="0" x2="78" y2="0" stroke="var(--border-strong)" stroke-dasharray="3 3" />
+        <svg viewBox="-100 -98 200 108" class="dial" aria-label="Vista coronal">
+          <!-- Semianillo superior: rango ±90° (vertical neutro arriba) -->
+          <path d="M -90 0 A 90 90 0 0 1 90 0 Z" fill="var(--surface-2)" stroke="var(--border)" />
           <!-- Banda roja: fuera de zona de advertencia -->
-          <circle cx="0" cy="0" r="78" fill="var(--danger)" opacity="0.10" />
-          <!-- Banda amarilla: ±1.5×ROLL_TOL -->
+          <path d="M -90 0 A 90 90 0 0 1 90 0 Z" fill="var(--danger)" opacity="0.10" />
+          <!-- Banda amarilla: ±2×ROLL_TOL -->
           <path
-            d={`M 0 0 L ${-78 * Math.sin(-ROLL_WARN * Math.PI / 180)} ${-78 * Math.cos(-ROLL_WARN * Math.PI / 180)} A 78 78 0 0 1 ${-78 * Math.sin(ROLL_WARN * Math.PI / 180)} ${-78 * Math.cos(ROLL_WARN * Math.PI / 180)} Z`}
-            fill="var(--warn)" opacity="0.22"
+            d={`M 0 0 L ${90 * Math.sin(-ROLL_WARN * Math.PI / 180)} ${-90 * Math.cos(-ROLL_WARN * Math.PI / 180)} A 90 90 0 0 1 ${90 * Math.sin(ROLL_WARN * Math.PI / 180)} ${-90 * Math.cos(ROLL_WARN * Math.PI / 180)} Z`}
+            fill="#facc15"
           />
           <!-- Zona objetivo roll (cono ±ROLL_TOL desde vertical) -->
           <path
-            d={`M 0 0 L ${-78 * Math.sin(-ROLL_TOL * Math.PI / 180)} ${-78 * Math.cos(-ROLL_TOL * Math.PI / 180)} A 78 78 0 0 1 ${-78 * Math.sin(ROLL_TOL * Math.PI / 180)} ${-78 * Math.cos(ROLL_TOL * Math.PI / 180)} Z`}
-            fill="var(--success)" opacity="0.32"
+            d={`M 0 0 L ${90 * Math.sin(-ROLL_TOL * Math.PI / 180)} ${-90 * Math.cos(-ROLL_TOL * Math.PI / 180)} A 90 90 0 0 1 ${90 * Math.sin(ROLL_TOL * Math.PI / 180)} ${-90 * Math.cos(ROLL_TOL * Math.PI / 180)} Z`}
+            fill="#22c55e"
           />
-          <!-- Cabeza vista frontal (coronal): solo rota con roll, sin distorsión por yaw -->
+          <!-- Cabeza vista frontal (coronal) — solo mitad superior, rota con roll -->
           <g transform="rotate({roll})">
-            <ellipse cx="0" cy="0" rx="36" ry="46" fill="var(--surface)" stroke="var(--head-color)" stroke-width="2" />
-            <circle cx="-12" cy="-10" r="3.2" fill="var(--accent)" />
-            <circle cx="12"  cy="-10" r="3.2" fill="var(--accent)" />
-            <path d="M -3 4 Q 0 12 3 4 Z" fill="var(--head-color)" />
-            <path d="M -8 22 Q 0 26 8 22" fill="none" stroke="var(--text-muted)" stroke-width="1.5" />
-            <ellipse cx="-36" cy="0" rx="3" ry="8" fill="var(--head-color)" opacity="0.6" />
-            <ellipse cx="36"  cy="0" rx="3" ry="8" fill="var(--head-color)" opacity="0.6" />
-            <!-- línea vertical de referencia para visualizar inclinación -->
-            <line x1="0" y1="-46" x2="0" y2="-72" stroke={Math.abs(roll) <= ROLL_TOL ? 'var(--success)' : 'var(--warn)'} stroke-width="2" stroke-dasharray="3 3" />
+            <line x1="0" y1="-54" x2="0" y2="-86" stroke="#000" stroke-width="3.5" stroke-linecap="round" />
+            <ellipse cx="0" cy="0" rx="42" ry="54" fill="var(--surface)" stroke="var(--head-color)" stroke-width="2" />
+            <circle cx="-14" cy="-12" r="4" fill="var(--accent)" />
+            <circle cx="14"  cy="-12" r="4" fill="var(--accent)" />
+            <path d="M -4 4 Q 0 14 4 4 Z" fill="var(--head-color)" />
+            <ellipse cx="-42" cy="0" rx="4" ry="10" fill="var(--head-color)" opacity="0.6" />
+            <ellipse cx="42"  cy="0" rx="4" ry="10" fill="var(--head-color)" opacity="0.6" />
           </g>
           <!-- Etiquetas -->
-          <text x="-78" y="-78" font-size="9" fill="var(--text-muted)">CORONAL</text>
-          <text x="-92" y="3" font-size="9" fill="var(--text-muted)">I</text>
-          <text x="86" y="3" font-size="9" fill="var(--text-muted)">D</text>
+          <text x="-92" y="-86" font-size="9" fill="var(--text-muted)">CORONAL</text>
+          <text x="-96" y="-3" font-size="11" fill="var(--text-muted)">I</text>
+          <text x="92"  y="-3" font-size="11" fill="var(--text-muted)">D</text>
+          {#if Math.abs(roll) > ROLL_WARN}
+            <g class="calibra">
+              <rect x="-70" y="-22" width="140" height="28" rx="4" fill="var(--danger)" />
+              <text x="0" y="-2" text-anchor="middle" font-size="20" font-weight="900" fill="white">CALIBRA!!!</text>
+            </g>
+          {/if}
         </svg>
         <div class="view-cap">roll</div>
       </div>
 
-      <!-- Vista lateral: perfil derecho (pitch como inclinación adelante/atrás) -->
+      <!-- Vista lateral: perfil derecho (pitch como inclinación adelante/atrás)
+           Banda central recortada (±50% vertical) para aprovechar espacio. -->
       <div class="view">
-        <svg viewBox="-100 -90 200 180" class="dial" aria-label="Vista lateral">
-          <circle cx="0" cy="0" r="78" fill="var(--surface-2)" stroke="var(--border)" />
-          <line x1="-78" y1="0" x2="78" y2="0" stroke="var(--border-strong)" stroke-dasharray="3 3" />
+        <svg viewBox="-100 -42 200 84" class="dial" aria-label="Vista lateral">
+          <circle cx="0" cy="0" r="92" fill="var(--surface-2)" stroke="var(--border)" />
+          <line x1="-92" y1="0" x2="92" y2="0" stroke="var(--border-strong)" stroke-dasharray="3 3" />
           <!-- Banda roja: fuera de zona de advertencia -->
-          <circle cx="0" cy="0" r="78" fill="var(--danger)" opacity="0.10" />
+          <circle cx="0" cy="0" r="92" fill="var(--danger)" opacity="0.10" />
           <!-- Banda amarilla: ±1.5×PITCH_TOL -->
           <path
-            d={`M 0 0 L ${78 * Math.cos(pitchWA)} ${78 * Math.sin(pitchWA)} A 78 78 0 0 1 ${78 * Math.cos(pitchWB)} ${78 * Math.sin(pitchWB)} Z`}
-            fill="var(--warn)" opacity="0.22"
+            d={`M 0 0 L ${92 * Math.cos(pitchWA)} ${92 * Math.sin(pitchWA)} A 92 92 0 0 1 ${92 * Math.cos(pitchWB)} ${92 * Math.sin(pitchWB)} Z`}
+            fill="#facc15"
           />
           <!-- Zona objetivo pitch (sector ±PITCH_TOL desde horizontal-frente) -->
           <path
-            d={`M 0 0 L ${78 * Math.cos(pitchA)} ${78 * Math.sin(pitchA)} A 78 78 0 0 1 ${78 * Math.cos(pitchB)} ${78 * Math.sin(pitchB)} Z`}
-            fill="var(--success)" opacity="0.32"
+            d={`M 0 0 L ${92 * Math.cos(pitchA)} ${92 * Math.sin(pitchA)} A 92 92 0 0 1 ${92 * Math.cos(pitchB)} ${92 * Math.sin(pitchB)} Z`}
+            fill="#22c55e"
           />
           <!-- Perfil cabeza, rota con pitch -->
           <g transform="rotate({pitch})">
-            <!-- cráneo -->
-            <ellipse cx="-4" cy="-4" rx="38" ry="42" fill="var(--surface)" stroke="var(--head-color)" stroke-width="2" />
-            <!-- nariz (apunta al frente = +X) -->
-            <path d="M 32 -2 L 46 -4 L 32 6 Z" fill="var(--head-color)" />
-            <!-- ojo -->
-            <circle cx="20" cy="-12" r="3" fill="var(--accent)" />
-            <!-- oreja -->
-            <ellipse cx="-30" cy="0" rx="4" ry="9" fill="var(--head-color)" opacity="0.7" />
-            <!-- mentón -->
-            <path d="M 14 28 Q 6 36 -8 32" fill="none" stroke="var(--head-color)" stroke-width="1.5" />
-            <!-- línea de mirada hacia adelante -->
-            <line x1="32" y1="0" x2="78" y2="0" stroke={Math.abs(pitch) <= PITCH_TOL ? 'var(--success)' : 'var(--warn)'} stroke-width="2" stroke-dasharray="3 3" />
+            <line x1="38" y1="0" x2="92" y2="0" stroke="#000" stroke-width="3.5" stroke-linecap="round" />
+            <ellipse cx="-4" cy="-4" rx="44" ry="48" fill="var(--surface)" stroke="var(--head-color)" stroke-width="2" />
+            <path d="M 38 -2 L 54 -4 L 38 8 Z" fill="var(--head-color)" />
+            <circle cx="24" cy="-14" r="3.5" fill="var(--accent)" />
+            <ellipse cx="-34" cy="0" rx="4" ry="10" fill="var(--head-color)" opacity="0.7" />
+            <path d="M 18 32 Q 8 42 -10 36" fill="none" stroke="var(--head-color)" stroke-width="1.5" />
           </g>
-          <text x="-78" y="-78" font-size="9" fill="var(--text-muted)">LATERAL</text>
-          <text x="86" y="3" font-size="9" fill="var(--text-muted)">F</text>
-          <text x="-92" y="3" font-size="9" fill="var(--text-muted)">A</text>
+          <text x="-92" y="-32" font-size="9" fill="var(--text-muted)">LATERAL</text>
+          <text x="94"  y="3" font-size="11" fill="var(--text-muted)">F</text>
+          <text x="-98" y="3" font-size="11" fill="var(--text-muted)">A</text>
+          {#if Math.abs(pitch) > PITCH_WARN}
+            <g class="calibra">
+              <rect x="-70" y="-15" width="140" height="28" rx="4" fill="var(--danger)" />
+              <text x="0" y="5" text-anchor="middle" font-size="20" font-weight="900" fill="white">CALIBRA!!!</text>
+            </g>
+          {/if}
         </svg>
         <div class="view-cap">pitch</div>
       </div>
@@ -432,8 +445,8 @@
   .pose-body {
     display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 8px; align-items: center;
   }
-  .view { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
-  .dial { width: 100%; height: auto; max-height: 90px; display: block; }
+  .view { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; }
+  .dial { height: 95px; width: auto; max-width: 100%; display: block; }
   .view-cap { font-size: 10px; color: var(--text-muted); font-family: ui-monospace, monospace; text-align: center; }
 
   .pose-readouts {
@@ -442,7 +455,11 @@
   }
   .ro { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
   .ro-lab { color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; min-width: 44px; }
-  .ro b { font-size: 18px; font-weight: 700; }
+  .ro b {
+    font-size: 18px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    display: inline-block; min-width: 64px; text-align: right;
+  }
   .ro b.warn { color: var(--warn); }
 
   .impulse.ok  { border-color: var(--success); }
