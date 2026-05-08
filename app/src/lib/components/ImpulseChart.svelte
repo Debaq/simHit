@@ -47,8 +47,8 @@
       <b>{impulses.length ? gain.toFixed(2) : '—'}</b>
     </span>
     <span class="legend">
-      <span><i class="solid"></i>cabeza</span>
-      <span><i class="dashed"></i>ojo</span>
+      <span><i class="solid"></i><b>Cabeza</b></span>
+      <span><i class="dashed"></i><b>Ojo</b></span>
     </span>
   </div>
   <div class="card-body">
@@ -107,10 +107,11 @@
   .gain { display: inline-flex; align-items: baseline; gap: 4px; font-family: ui-monospace, monospace; }
   .gain-lab { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
   .gain b { font-size: 16px; font-weight: 700; }
-  .legend { display: inline-flex; gap: 8px; margin-left: auto; font-size: 10px; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
-  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .legend { display: inline-flex; gap: 10px; margin-left: auto; font-size: 12px; text-transform: none; letter-spacing: 0; color: var(--text); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend b { font-weight: 700; }
   .legend i {
-    width: 14px; height: 0; border-top: 2px solid var(--side);
+    width: 22px; height: 0; border-top: 3px solid var(--side);
     display: inline-block;
   }
   .legend i.dashed { border-top-style: dashed; }

@@ -12,8 +12,9 @@
 
   onMount(() => {
     const css = getComputedStyle(document.documentElement);
-    const head = css.getPropertyValue('--head-color').trim() || '#7c3aed';
-    const eye = css.getPropertyValue('--eye-color').trim() || '#f59e0b';
+    // Colores distintos a side-ll (azul) y side-rl (rojo) para no confundir lados.
+    const head = '#111827';   // gris carbón → cabeza
+    const eye  = '#ca8a04';   // ámbar → ojo
     const grid = css.getPropertyValue('--grid').trim() || '#ede9fe';
     const muted = css.getPropertyValue('--text-muted').trim() || '#64748b';
 
@@ -24,7 +25,13 @@
       padding: [8, 12, 0, 0],
       scales: {
         x: { time: false },
-        y: { range: [-260, 260] },
+        // Autoscale con piso ±260°/s para que picos altos no se corten.
+        y: {
+          range: (_u, dataMin, dataMax) => {
+            const m = Math.max(260, Math.abs(dataMin ?? 0), Math.abs(dataMax ?? 0)) * 1.1;
+            return [-m, m];
+          },
+        },
       },
       axes: [
         {
@@ -37,8 +44,8 @@
           stroke: muted,
           grid: { stroke: grid, width: 1 },
           ticks: { stroke: grid },
-          label: '°/s',
-          labelSize: 24,
+          label: 'velocidad angular (°/s)',
+          labelSize: 26,
         },
       ],
       series: [
@@ -89,8 +96,8 @@
   <div class="card-title">
     {title}
     <span class="legend">
-      <span><i style:background="var(--head-color)"></i>Cabeza</span>
-      <span><i style:background="var(--eye-color)"></i>Ojo</span>
+      <span><i style:background="#111827"></i><b>Cabeza</b> (gyro)</span>
+      <span><i style:background="#ca8a04"></i><b>Ojo</b> (VOR)</span>
     </span>
   </div>
   <div bind:this={host} class="plot-host">
@@ -114,11 +121,13 @@
     inset: 0;
   }
   .legend {
-    display: flex; gap: 12px; font-size: 11px;
+    display: flex; gap: 14px; font-size: 12px;
     text-transform: none; letter-spacing: 0;
+    color: var(--text);
   }
-  .legend span { display: inline-flex; align-items: center; gap: 5px; }
-  .legend i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend b { font-weight: 700; }
+  .legend i { width: 18px; height: 4px; border-radius: 2px; display: inline-block; }
   :global(.uplot) { font-family: inherit; }
   :global(.uplot .u-legend) { display: none; }
 </style>
