@@ -4,6 +4,7 @@
   import { onMount } from 'svelte';
   import { sim } from '$lib/simulator.svelte';
   import { serial } from '$lib/serial.svelte';
+  import { bundles } from '$lib/bundle.svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
 
   const appWindow = getCurrentWindow();
@@ -208,6 +209,18 @@
   </nav>
 
   <div class="status">
+    {#if bundles.active}
+      <button
+        class="bundle-chip"
+        onclick={() => goto('/docente')}
+        title="Escenario activo — clic para abrir Modo docente"
+      >
+        <span class="ic" aria-hidden="true">🎓</span>
+        <span class="lab">Escenario</span>
+        <b>{bundles.active.name}</b>
+      </button>
+    {/if}
+
     <button
       class="cam"
       class:on={sim.cameraOn}
@@ -536,6 +549,30 @@
   .status { display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; white-space: nowrap; min-width: 0; }
   .nav { min-width: 0; }
   .serial { flex-wrap: nowrap; }
+  .bundle-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border-strong);
+    background: var(--primary-soft);
+    color: var(--primary);
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    cursor: pointer;
+    max-width: 240px;
+    transition: background .15s, border-color .15s;
+  }
+  .bundle-chip:hover { background: var(--primary); color: white; border-color: var(--primary); }
+  .bundle-chip .ic { font-size: 12px; }
+  .bundle-chip .lab {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+    color: inherit; opacity: .8;
+  }
+  .bundle-chip b {
+    font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 160px;
+  }
+
   .cam {
     display: inline-flex; align-items: center; gap: 8px;
     border: 1px solid var(--border-strong);

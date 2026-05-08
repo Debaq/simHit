@@ -15,6 +15,7 @@
   let { open, side, channels, impulsesBy, onClose, onChangeSide }: Props = $props();
 
   let focusedId = $state<number | null>(null);
+  let hoveredId = $state<number | null>(null);
   let excluded = $state<Set<number>>(new Set());
   let mode = $state<'single' | 'overlay'>('single');
   let tWindow = $state<[number, number]>([-50, 250]);
@@ -134,7 +135,15 @@
             <p class="empty">Sin impulsos en este canal.</p>
           {/if}
           {#each impulses as imp, idx}
-            <div class="trial" class:focused={imp.id === focusedId} class:excluded={excluded.has(imp.id)}>
+            <div
+              class="trial"
+              class:focused={imp.id === focusedId}
+              class:hovered={imp.id === hoveredId}
+              class:excluded={excluded.has(imp.id)}
+              onmouseenter={() => (hoveredId = imp.id)}
+              onmouseleave={() => (hoveredId = null)}
+              role="presentation"
+            >
               <button class="trial-btn" onclick={() => (focusedId = imp.id)}>
                 <span class="num">#{idx + 1}</span>
                 <span class="g" style:color={sideColor(side)}>g {imp.gain.toFixed(2)}</span>
@@ -185,10 +194,32 @@
             <text x={12} y={PAD.t + 8} font-size="10" fill="var(--text-muted)">°/s</text>
 
             {#if mode === 'overlay'}
-              {#each included as imp (imp.id)}
+              {#each impulses as imp (imp.id)}
                 {@const sc = scaleFor(imp)}
-                <path d={pathFor(imp.t, imp.head, flip, sc)} fill="none" stroke={sideColor(side)} stroke-width="1.4" opacity="0.4" />
-                <path d={pathFor(imp.t, imp.eye, flip, sc)} fill="none" stroke={sideColor(side)} stroke-width="1.2" opacity="0.55" stroke-dasharray="3 2" />
+                {@const isExcl = excluded.has(imp.id)}
+                {@const isHov = imp.id === hoveredId}
+                {@const dimOther = hoveredId != null && !isHov}
+                {@const baseOp = isExcl ? 0.15 : 0.4}
+                {@const opH = isHov ? 1 : (dimOther ? 0.12 : baseOp)}
+                {@const opE = isHov ? 1 : (dimOther ? 0.12 : baseOp + 0.15)}
+                {@const swH = isHov ? 2.6 : 1.4}
+                {@const swE = isHov ? 2.2 : 1.2}
+                <g
+                  class="ov-g"
+                  class:hov={isHov}
+                  class:excl={isExcl}
+                  onmouseenter={() => (hoveredId = imp.id)}
+                  onmouseleave={() => (hoveredId = null)}
+                  onclick={() => toggleExclude(imp.id)}
+                  role="button"
+                  tabindex="-1"
+                >
+                  <!-- hit area: misma path engrosada e invisible -->
+                  <path d={pathFor(imp.t, imp.head, flip, sc)} fill="none" stroke="transparent" stroke-width="10" pointer-events="stroke" />
+                  <path d={pathFor(imp.t, imp.eye, flip, sc)} fill="none" stroke="transparent" stroke-width="10" pointer-events="stroke" />
+                  <path d={pathFor(imp.t, imp.head, flip, sc)} fill="none" stroke={sideColor(side)} stroke-width={swH} opacity={opH} pointer-events="none" stroke-dasharray={isExcl ? '4 3' : ''} />
+                  <path d={pathFor(imp.t, imp.eye, flip, sc)} fill="none" stroke={sideColor(side)} stroke-width={swE} opacity={opE} stroke-dasharray="3 2" pointer-events="none" />
+                </g>
               {/each}
             {:else if focused}
               {@const sc = scaleFor(focused)}
@@ -241,7 +272,7 @@
             </dl>
           {/if}
           <div class="hint muted small">
-            ↑/↓ navega · Esc cierra
+            ↑/↓ navega · Esc cierra{mode === 'overlay' ? ' · click en curva = excluir/incluir' : ''}
           </div>
         </aside>
       </div>
@@ -322,7 +353,10 @@
     border-bottom: 1px solid var(--border);
   }
   .trial.focused { background: var(--primary-soft); }
+  .trial.hovered { background: var(--primary-soft); outline: 1px solid var(--primary); outline-offset: -1px; }
   .trial.excluded { opacity: .5; }
+  .ov-g { cursor: pointer; }
+  .ov-g.hov { filter: drop-shadow(0 0 2px var(--primary)); }
   .trial-btn {
     border: none; background: transparent; padding: 8px 10px;
     text-align: left; cursor: pointer;

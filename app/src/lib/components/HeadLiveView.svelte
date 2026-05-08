@@ -292,6 +292,7 @@
         <span class="muted small">#{last.id}</span>
       {/if}
       {#if verdict}
+        <span class="level-chip" title="Nivel de aceptación activo">{verdict.levelName}</span>
         <span class="badge {verdict.ok ? 'ok' : 'bad'}">{verdict.ok ? '✓' : '✗'}</span>
       {/if}
     </div>
@@ -441,6 +442,16 @@
   }
   .side-chip.ll { background: var(--side-ll); }
   .side-chip.rl { background: var(--side-rl); }
+
+  .level-chip {
+    margin-left: auto;
+    font-size: 10px; font-weight: 600; letter-spacing: .03em;
+    padding: 1px 8px; border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text-muted);
+    text-transform: none;
+  }
 
   .muted { color: var(--text-muted); }
   .small { font-size: 11px; }
