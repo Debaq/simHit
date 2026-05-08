@@ -5,6 +5,12 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "core:window:allow-is-maximized",
+    "core:webview:allow-internal-toggle-devtools",
     "opener:default",
     "serialplugin:default",
     "serialplugin:allow-available-ports",
@@ -26,6 +32,8 @@
     "fs:allow-write-file",
     "fs:allow-remove",
     "fs:allow-exists",
+    "dialog:default",
+    "dialog:allow-save",
     {
       "identifier": "fs:scope",
       "allow": [

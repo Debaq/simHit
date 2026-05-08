@@ -69,8 +69,48 @@
     reports.upsert($state.snapshot(report) as Report);
   }
 
-  function downloadPdf() {
-    window.print();
+  async function downloadPdf() {
+    if (!report) return;
+    const { save } = await import('@tauri-apps/plugin-dialog');
+    const { invoke } = await import('@tauri-apps/api/core');
+    // @ts-expect-error: html2pdf.js no incluye tipos
+    const html2pdfMod = await import('html2pdf.js');
+    const html2pdf = html2pdfMod.default ?? html2pdfMod;
+
+    const safeCode = (report.examenCode || 'examen').replace(/[^\w-]+/g, '_');
+    const dateStr = new Date(report.date).toISOString().slice(0, 10);
+    const defaultName = `informe-${safeCode}-${dateStr}.pdf`;
+
+    const target = await save({
+      defaultPath: defaultName,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (!target) return;
+
+    const article = document.querySelector('article.report') as HTMLElement | null;
+    if (!article) return;
+
+    document.body.classList.add('is-exporting');
+    try {
+      const blob: Blob = await html2pdf()
+        .from(article)
+        .set({
+          margin: [14, 16, 14, 16],
+          filename: defaultName,
+          image: { type: 'jpeg', quality: 0.96 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+          pagebreak: { mode: ['css', 'legacy'] },
+        })
+        .outputPdf('blob');
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      await invoke('save_pdf', { path: target, bytes: Array.from(buf) });
+    } catch (e) {
+      console.error(e);
+      alert('No se pudo generar el PDF: ' + (e as Error).message);
+    } finally {
+      document.body.classList.remove('is-exporting');
+    }
   }
 
   let allScenarios = $derived([...scenarios.examples, ...scenarios.list]);
@@ -79,15 +119,14 @@
   // resumen del escenario verdadero (para reveal)
   let trueSummary = $derived(() => {
     if (!trueScenario) return null;
-    const impulses = trueScenario.nodes.filter((n) => n.type === 'impulse');
-    const sides = impulses.map((n) => (n.data as any).side);
-    const gains = impulses.map((n) => (n.data as any).gain);
-    const saccades = impulses.map((n) => (n.data as any).saccade);
-    const artifacts = trueScenario.nodes.filter((n) => n.type === 'artifact').map((n) => (n.data as any).artifact);
+    const ll = trueScenario.channels.LL;
+    const rl = trueScenario.channels.RL;
+    const allArtifacts = [...ll.artifacts, ...rl.artifacts].map((a) => a.artifact);
     return {
       name: trueScenario.name,
       description: trueScenario.description,
-      sides, gains, saccades, artifacts,
+      ll, rl,
+      artifacts: Array.from(new Set(allArtifacts)),
     };
   });
 
@@ -148,7 +187,7 @@
             </label>
             <label>
               <span>Profesión / cargo</span>
-              <input type="text" bind:value={report.examinerTitle} oninput={scheduleSave} disabled={report.submitted} placeholder="Fonoaudiólogo…" />
+              <input type="text" bind:value={report.examinerTitle} oninput={scheduleSave} disabled={report.submitted} placeholder="Evaluador…" />
             </label>
             <label>
               <span>Institución</span>
@@ -283,9 +322,8 @@
               {/if}
               <table class="reveal-table">
                 <tbody>
-                  <tr><th>Lados configurados</th><td>{summary?.sides.join(', ')}</td></tr>
-                  <tr><th>Ganancias esperadas</th><td>{summary?.gains.map((g: number) => g.toFixed(2)).join(', ')}</td></tr>
-                  <tr><th>Sacadas configuradas</th><td>{summary?.saccades.join(', ')}</td></tr>
+                  <tr><th>Lateral izq. (LL)</th><td>gain {summary?.ll.gain.toFixed(2)} · {summary?.ll.peakVel}°/s · sacada {summary?.ll.saccade}</td></tr>
+                  <tr><th>Lateral der. (RL)</th><td>gain {summary?.rl.gain.toFixed(2)} · {summary?.rl.peakVel}°/s · sacada {summary?.rl.saccade}</td></tr>
                   {#if summary?.artifacts.length}
                     <tr><th>Artefactos</th><td>{summary.artifacts.join(', ')}</td></tr>
                   {/if}
@@ -335,6 +373,9 @@
   /* Visibilidad pantalla vs PDF */
   .print-only { display: none !important; }
   @media print { .screen-only { display: none !important; } .print-only { display: flex !important; } }
+  :global(body.is-exporting) .screen-only { display: none !important; }
+  :global(body.is-exporting) .print-only { display: flex !important; }
+  :global(body.is-exporting) .no-print { display: none !important; }
 
   /* Barra de estado (pantalla) */
   .status-bar {
@@ -451,4 +492,20 @@
     h2 { color: #333; border-color: #ddd; }
     .reveal { display: none; }
   }
+
+  /* Replica de estilos print al exportar a PDF */
+  :global(body.is-exporting) .app,
+  :global(body.is-exporting) .page { background: white; padding: 0; max-width: none; display: block; }
+  :global(body.is-exporting) .report { display: block; gap: 0; }
+  :global(body.is-exporting) .report > section { margin-bottom: 8px; }
+  :global(body.is-exporting) section,
+  :global(body.is-exporting) .rep-head,
+  :global(body.is-exporting) .rep-foot {
+    box-shadow: none; border: none; border-radius: 0; padding: 6px 0; background: white;
+  }
+  :global(body.is-exporting) section { border-top: 1px solid #ddd; }
+  :global(body.is-exporting) .rep-head { border-bottom: 2px solid #333; padding-bottom: 8px; }
+  :global(body.is-exporting) .rep-foot { border-top: 1px solid #ddd; padding-top: 14px; }
+  :global(body.is-exporting) h2 { color: #333; border-color: #ddd; }
+  :global(body.is-exporting) .reveal { display: none; }
 </style>
