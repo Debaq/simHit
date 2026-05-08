@@ -118,7 +118,8 @@
 
 {#if open}
   <div class="backdrop" onclick={onClose} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
       <header class="head">
         <div class="tabs">
           {#each channels as ch}
@@ -232,6 +233,7 @@
                   onmouseenter={() => (hoveredId = imp.id)}
                   onmouseleave={() => (hoveredId = null)}
                   onclick={() => toggleExclude(imp.id)}
+                  onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExclude(imp.id); } }}
                   role="button"
                   tabindex="-1"
                 >

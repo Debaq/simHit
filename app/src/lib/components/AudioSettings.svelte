@@ -12,7 +12,8 @@
 
 {#if open}
   <div class="backdrop" onclick={onClose} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
       <header class="head">
         <span>Configuración de sonido</span>
         <button class="close" onclick={onClose} aria-label="Cerrar">✕</button>
