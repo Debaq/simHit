@@ -1,0 +1,81 @@
+:root {
+  --bg: #fff8f1;
+  --surface: #ffffff;
+  --surface-2: #fefaf5;
+  --border: #fed7aa;
+  --border-strong: #fdba74;
+  --primary: #ea580c;
+  --primary-hover: #c2410c;
+  --primary-soft: #ffedd5;
+  --accent: #7c3aed;
+  --accent-soft: #ede9fe;
+  --text: #1c1917;
+  --text-muted: #64748b;
+  --danger: #e11d48;
+  --success: #16a34a;
+  --warn: #d97706;
+
+  /* Convención vHIT: derecho (RL) rojo, izquierdo (LL) azul */
+  --side-ll: #2563eb;
+  --side-ll-soft: #dbeafe;
+  --side-rl: #dc2626;
+  --side-rl-soft: #fee2e2;
+
+  --head-color: #ea580c;     /* cabeza = naranja (brand) */
+  --eye-color: #7c3aed;      /* ojo = morado (acento) */
+  --grid: #fde4cf;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow-sm: 0 1px 2px rgba(76, 29, 149, 0.06);
+  --shadow: 0 4px 12px rgba(76, 29, 149, 0.08);
+
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); }
+/* Compensa el TopBar fixed (≈58px) — válido para todas las rutas */
+.app { padding-top: 58px; }
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  transition: background .15s, border-color .15s, color .15s;
+}
+button:hover { background: var(--primary-soft); border-color: var(--primary); }
+button:active { background: var(--primary); color: white; }
+button.primary { background: var(--primary); color: white; border-color: var(--primary); }
+button.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+button.ghost { background: transparent; border-color: transparent; }
+button.ghost:hover { background: var(--primary-soft); }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.card-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.card-body { padding: 12px; }
