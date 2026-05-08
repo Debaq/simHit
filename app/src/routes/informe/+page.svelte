@@ -3,6 +3,7 @@
   import TopBar from '$lib/components/TopBar.svelte';
   import { reports, DIAGNOSIS_LABELS } from '$lib/report.svelte';
   import { goto } from '$app/navigation';
+  import { ui } from '$lib/dialog.svelte';
 
   onMount(() => reports.load());
 
@@ -14,8 +15,8 @@
     if (g >= 0.6) return 'var(--warn)';
     return 'var(--danger)';
   }
-  function deleteReport(id: string, name: string) {
-    if (confirm(`Eliminar informe "${name}"?`)) reports.remove(id);
+  async function deleteReport(id: string, name: string) {
+    if (await ui.confirm(`Eliminar informe "${name}"`, 'Esta acción no se puede deshacer.', { danger: true })) reports.remove(id);
   }
 </script>
 

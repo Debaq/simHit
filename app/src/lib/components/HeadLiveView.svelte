@@ -1,6 +1,7 @@
 <script lang="ts">
   import { sim } from '$lib/simulator.svelte';
   import { serial, type Axis, type AxesConfig } from '$lib/serial.svelte';
+  import { acceptance } from '$lib/acceptance.svelte';
 
   let showAxes = $state(false);
   const AXES: Axis[] = ['x', 'y', 'z'];
@@ -42,10 +43,11 @@
     return { w, pos: v >= 0 };
   }
 
-  // Tolerancia de pose neutra (°) para considerar que la cabeza está en posición correcta
-  const YAW_TOL = 6;
-  const PITCH_TOL = 6;
-  const ROLL_TOL = 6;
+  // Tolerancia de pose neutra (°) para considerar que la cabeza está en posición correcta.
+  // Configurable por el docente desde el panel de aceptación.
+  let YAW_TOL = $derived(acceptance.active.yawTol);
+  let PITCH_TOL = $derived(acceptance.active.pitchTol);
+  let ROLL_TOL = $derived(acceptance.active.rollTol);
 
   // Pose objetivo (puede llegar en ráfagas por batching del serial USB)
   let yawTarget = $derived(sim.headYaw);
@@ -283,35 +285,28 @@
 
   <!-- Panel ÚLTIMO IMPULSO -->
   <div class="panel impulse" class:ok={verdict?.ok} class:bad={verdict && !verdict.ok}>
-    <div class="panel-title">
+    <div class="panel-title impulse-title">
       <span>Último impulso</span>
       {#if last}
         <span class="side-chip {last.side === 'LL' ? 'll' : 'rl'}">{last.side}</span>
         <span class="muted small">#{last.id}</span>
       {/if}
+      {#if verdict}
+        <span class="badge {verdict.ok ? 'ok' : 'bad'}">{verdict.ok ? '✓' : '✗'}</span>
+      {/if}
     </div>
 
     {#if !last}
-      <div class="empty">Sin impulsos aún. Realiza una prueba.</div>
+      <div class="empty">Sin impulsos aún.</div>
     {:else if verdict}
-      <div class="imp-grid">
-        <div class="imp-cell">
-          <span class="ro-lab">pico</span>
-          <b>{verdict.peak.toFixed(0)}<span class="unit">°/s</span></b>
-        </div>
-        <div class="imp-cell">
-          <span class="ro-lab">ganancia</span>
-          <b>{verdict.gain.toFixed(2)}</b>
-        </div>
-        <div class="imp-cell verdict">
-          {#if verdict.ok}
-            <span class="badge ok">✓ Aceptado</span>
-          {:else}
-            <span class="badge bad">✗ Rechazado</span>
-            <span class="muted small">{verdict.reasons.join(' · ')}</span>
-          {/if}
-        </div>
+      <div class="imp-row">
+        <div class="imp-cell"><span class="ro-lab">pico</span><b>{verdict.peak.toFixed(0)}<span class="unit">°/s</span></b></div>
+        <div class="imp-cell"><span class="ro-lab">ganancia</span><b>{verdict.gain.toFixed(2)}</b></div>
+        <div class="imp-cell"><span class="ro-lab">despl.</span><b>{verdict.amp.toFixed(1)}<span class="unit">°</span></b></div>
       </div>
+      {#if !verdict.ok}
+        <div class="reasons muted small">{verdict.reasons.join(' · ')}</div>
+      {/if}
     {/if}
   </div>
 
@@ -421,17 +416,22 @@
   .impulse.ok  { border-color: var(--success); }
   .impulse.bad { border-color: var(--danger); }
 
-  .empty { color: var(--text-muted); font-size: 12px; padding: 4px 0 6px; }
+  .empty { color: var(--text-muted); font-size: 11px; padding: 2px 0; }
 
-  .imp-grid {
-    display: grid; grid-template-columns: auto auto 1fr; gap: 12px; align-items: center;
+  .impulse { padding: 6px 10px; }
+  .impulse .panel-title { margin-bottom: 4px; }
+  .impulse-title .badge { margin-left: 4px; }
+
+  .imp-row {
+    display: flex; gap: 14px; align-items: baseline;
   }
-  .imp-cell { display: flex; flex-direction: column; gap: 2px; font-family: ui-monospace, monospace; }
-  .imp-cell b { font-size: 18px; font-weight: 700; }
-  .imp-cell .unit { font-size: 10px; color: var(--text-muted); margin-left: 2px; }
-  .imp-cell.verdict { font-family: inherit; align-items: flex-start; }
+  .imp-cell { display: inline-flex; align-items: baseline; gap: 4px; font-family: ui-monospace, monospace; }
+  .imp-cell .ro-lab { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+  .imp-cell b { font-size: 14px; font-weight: 700; }
+  .imp-cell .unit { font-size: 10px; color: var(--text-muted); margin-left: 1px; }
+  .reasons { margin-top: 4px; }
 
-  .badge { padding: 4px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; }
+  .badge { padding: 1px 8px; border-radius: 999px; font-weight: 700; font-size: 11px; }
   .badge.ok  { background: var(--success); color: white; }
   .badge.bad { background: var(--danger); color: white; }
 

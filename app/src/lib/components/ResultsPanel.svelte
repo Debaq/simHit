@@ -1,11 +1,13 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { sim } from '$lib/simulator.svelte';
+  import { serial } from '$lib/serial.svelte';
   import { scenarios } from '$lib/scenario.svelte';
   import { reports, emptyFindings, type ImpulseSnapshot, type Report } from '$lib/report.svelte';
   import HeadLiveView from './HeadLiveView.svelte';
   import AudioSettings from './AudioSettings.svelte';
   import { audio } from '$lib/audio.svelte';
+  import { ui } from '$lib/dialog.svelte';
 
   let audioModalOpen = $state(false);
 
@@ -35,13 +37,7 @@
     if (scenarios.active) sim.runScenario(scenarios.active);
   }
 
-  // Lista anónima: examen 01, 02, ... (orden combinado examples + user)
   let examList = $derived([...scenarios.examples, ...scenarios.list]);
-  let activeIndex = $derived(examList.findIndex((s) => s.id === scenarios.activeId));
-  function pickExam(e: Event) {
-    const idx = +(e.target as HTMLSelectElement).value;
-    if (examList[idx]) scenarios.setActive(examList[idx].id);
-  }
 
   function snapshotImpulses(): ImpulseSnapshot[] {
     const all = [...sim.impulsesLL, ...sim.impulsesRL];
@@ -55,13 +51,13 @@
     }));
   }
 
-  function generateReport() {
+  async function generateReport() {
     if (sim.impulsesLL.length + sim.impulsesRL.length === 0) {
-      alert('Realiza un examen antes de generar el informe.');
+      await ui.alert('Sin impulsos', 'Realiza un examen antes de generar el informe.');
       return;
     }
     if (sim.mode !== 'idle') {
-      alert('Detén el examen antes de generar el informe.');
+      await ui.alert('Examen en curso', 'Detén el examen antes de generar el informe.');
       return;
     }
     const id = crypto.randomUUID();
@@ -115,38 +111,26 @@
     <div class="head-live-wrap">
       <HeadLiveView />
     </div>
-    <div class="scenario-info">
-      <label class="picker">
-        <span>Examen</span>
-        <select onchange={pickExam} disabled={sim.mode !== 'idle'} value={String(activeIndex)}>
-          {#each examList as s, i}
-            <option value={i}>{String(i + 1).padStart(2, '0')}</option>
-          {/each}
-        </select>
-      </label>
-      {#if sim.mode === 'scenario'}
-        <span class="status running"><span class="led"></span>En curso</span>
-      {:else if sim.mode === 'free'}
-        <span class="status running"><span class="led"></span>Modo libre</span>
-      {:else}
-        <span class="status idle"><span class="led"></span>Listo</span>
-      {/if}
-    </div>
     <div class="actions">
       <button
         class="primary"
-        disabled={!sim.connected || !scenarios.active}
+        disabled={!sim.connected || !scenarios.active || (serial.connected && !serial.calibrated)}
+        title={serial.connected && !serial.calibrated ? 'Calibrar SimHit antes de iniciar' : ''}
         onclick={() => (sim.mode === 'scenario' ? sim.stop() : runScenario())}
       >
-        {sim.mode === 'scenario' ? '■ Detener test' : '▶ Iniciar test'}
+        {sim.mode === 'scenario' ? (serial.connected ? '■ Detener test' : '■ Detener demo') : (serial.connected ? '▶ Iniciar test' : '▶ Iniciar demo')}
       </button>
       <button
-        disabled={!sim.connected}
+        disabled={!sim.connected || (serial.connected && !serial.calibrated)}
+        title={serial.connected && !serial.calibrated ? 'Calibrar SimHit antes de iniciar' : ''}
         onclick={() => (sim.mode === 'free' ? sim.stop() : sim.startFreeMode())}
       >
         {sim.mode === 'free' ? '■ Detener libre' : '⤧ Modo libre'}
       </button>
-      <button onclick={() => sim.clearImpulses()}>Limpiar</button>
+      <button
+        disabled={sim.impulsesLL.length + sim.impulsesRL.length === 0}
+        onclick={() => sim.clearImpulses()}
+      >Limpiar</button>
       <button
         class="primary"
         disabled={sim.impulsesLL.length + sim.impulsesRL.length === 0}
@@ -179,40 +163,16 @@
   }
   .icon-btn:hover { background: var(--primary-soft); border-color: var(--primary); }
   .icon-btn.on { background: var(--success); color: white; border-color: var(--success); }
-  .scenario-info {
+  .actions {
     grid-column: 1 / -1;
+    display: flex; gap: 8px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 6px 10px;
-    font-size: 11px;
-    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-  }
-  .scenario-info .muted { color: var(--text-muted); font-style: italic; }
-  .picker { display: inline-flex; align-items: center; gap: 6px; }
-  .picker span { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
-  .picker select {
-    font: inherit; font-size: 12px;
-    padding: 3px 6px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    background: var(--surface);
-    color: var(--text);
-    font-family: ui-monospace, monospace;
-    font-weight: 600;
-  }
-  .picker select:disabled { opacity: .5; cursor: not-allowed; }
-  .status { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-  .status .led { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; }
-  .status.running { color: var(--success); }
-  .status.running .led { background: var(--success); box-shadow: 0 0 0 3px rgba(22,163,74,.15); animation: pulse 1.4s ease-in-out infinite; }
-  .status.idle { color: var(--text-muted); }
-  @keyframes pulse { 50% { opacity: .5; } }
-  .actions {
-    grid-column: 1 / -1;
-    display: flex; gap: 8px;
-    justify-content: center;
-    flex-wrap: wrap;
   }
   .actions button { font-size: 12px; padding: 6px 10px; }
   button:disabled { opacity: .4; cursor: not-allowed; }

@@ -7,6 +7,7 @@
   } from '$lib/eyeset.svelte';
   import { frameRefEq } from '$lib/eyeset.svelte';
   import type { ArtifactKind } from '$lib/scenario.svelte';
+  import { ui } from '$lib/dialog.svelte';
 
   const ARTIFACT_LABELS: Record<ArtifactKind, string> = {
     blink: 'Parpadeo',
@@ -103,19 +104,19 @@
     });
   }
 
-  function newSet() {
-    const name = prompt('Nombre del set', 'Mi set');
+  async function newSet() {
+    const name = await ui.prompt('Nombre del set', 'Mi set');
     if (!name) return;
     eyeset.createCustom(name);
   }
   function duplicateActive() { if (active) eyeset.duplicate(active.id); }
-  function removeActive() {
+  async function removeActive() {
     if (!active || active.builtin) return;
-    if (confirm(`Eliminar set "${active.name}"?`)) eyeset.remove(active.id);
+    if (await ui.confirm(`Eliminar set "${active.name}"`, 'Esta acción no se puede deshacer.', { danger: true })) eyeset.remove(active.id);
   }
-  function renameActive() {
+  async function renameActive() {
     if (!active) return;
-    const name = prompt('Renombrar set', active.name);
+    const name = await ui.prompt('Renombrar set', active.name);
     if (name) eyeset.rename(active.id, name);
   }
 
@@ -174,7 +175,7 @@
       <button onclick={renameActive} disabled={!active || active.builtin}>✎ Renombrar</button>
       <button class="danger" onclick={removeActive} disabled={!active || active.builtin}>× Eliminar</button>
       <span class="counter">{markedFrames}/{totalFrames} pupilas marcadas</span>
-      <button onclick={() => { if (confirm('Borrar marcas de este set?')) eyeset.clearActiveMarkers(); }}>Limpiar marcas</button>
+      <button onclick={async () => { if (await ui.confirm('Borrar marcas de este set', 'Se eliminan todos los marcadores de pupila.', { danger: true })) eyeset.clearActiveMarkers(); }}>Limpiar marcas</button>
     </div>
 
     {#if active?.builtin}
@@ -298,7 +299,7 @@
           {#if !active?.builtin}
             <div class="ed-actions">
               <button onclick={replaceSelected}>📁 Reemplazar imagen</button>
-              <button class="link-danger" onclick={() => { if (confirm('Eliminar este frame?')) { eyeset.removeFrame(selected); selected = { kind: 'center' }; } }}>Eliminar frame</button>
+              <button class="link-danger" onclick={async () => { if (await ui.confirm('Eliminar este frame', 'Esta acción no se puede deshacer.', { danger: true })) { eyeset.removeFrame(selected); selected = { kind: 'center' }; } }}>Eliminar frame</button>
             </div>
           {/if}
 

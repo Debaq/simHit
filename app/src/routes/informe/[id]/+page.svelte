@@ -7,6 +7,7 @@
   import ImpulseModal from '$lib/components/ImpulseModal.svelte';
   import { reports, DIAGNOSIS_LABELS, emptyFindings, type Report, type Diagnosis, type Side } from '$lib/report.svelte';
   import { scenarios } from '$lib/scenario.svelte';
+  import { ui } from '$lib/dialog.svelte';
 
   let modalOpen = $state(false);
   let modalSide = $state<Side>('LL');
@@ -57,13 +58,13 @@
     return report?.impulses.filter((i) => i.side === side) ?? [];
   }
 
-  function submit() {
+  async function submit() {
     if (!report) return;
     if (!report.diagnosis) {
-      alert('Selecciona un diagnóstico antes de enviar.');
+      await ui.alert('Falta el diagnóstico', 'Selecciona un diagnóstico antes de enviar el informe.');
       return;
     }
-    if (!confirm('Una vez enviado el informe queda definitivo. ¿Continuar?')) return;
+    if (!(await ui.confirm('Enviar informe', 'Una vez enviado, el informe queda definitivo y no se podrá editar.'))) return;
     report.submitted = true;
     report.submittedAt = Date.now();
     reports.upsert($state.snapshot(report) as Report);
@@ -107,7 +108,7 @@
       await invoke('save_pdf', { path: target, bytes: Array.from(buf) });
     } catch (e) {
       console.error(e);
-      alert('No se pudo generar el PDF: ' + (e as Error).message);
+      await ui.alert('Error al generar el PDF', (e as Error).message);
     } finally {
       document.body.classList.remove('is-exporting');
     }

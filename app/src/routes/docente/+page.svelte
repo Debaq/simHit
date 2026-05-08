@@ -1,66 +1,57 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import TopBar from '$lib/components/TopBar.svelte';
-  import {
-    scenarios,
-    HORIZONTAL_CHANNELS,
-    VERTICAL_CHANNELS,
-    CHANNEL_LABELS,
-    type Channel,
-    type ChannelConfig,
-    type ArtifactKind,
-    type ArtifactConfig,
-  } from '$lib/scenario.svelte';
+  import { bundles, type Escenario } from '$lib/bundle.svelte';
+  import { scenarios } from '$lib/scenario.svelte';
+  import { acceptance } from '$lib/acceptance.svelte';
+  import { eyeset } from '$lib/eyeset.svelte';
+  import { ui } from '$lib/dialog.svelte';
 
-  onMount(() => { scenarios.load(); });
+  onMount(async () => {
+    await scenarios.load();
+    if (bundles.active) bundles.applyActive();
+  });
 
-  let activeScenario = $derived(scenarios.active);
-  let editable = $derived(!!activeScenario && !scenarios.isExampleActive);
+  let active = $derived(bundles.active);
 
-  function newScenario() {
-    const name = prompt('Nombre del escenario', 'Nuevo escenario');
+  async function newBundle() {
+    const name = await ui.prompt('Nombre del escenario', 'Nuevo escenario');
     if (!name) return;
-    scenarios.create(name);
-  }
-  function deleteScenario(id: string) {
-    if (!confirm('¿Eliminar escenario?')) return;
-    scenarios.remove(id);
-  }
-  function duplicateActive() {
-    if (!activeScenario) return;
-    scenarios.duplicate(activeScenario.id);
+    bundles.create(name);
   }
 
-  function updateChannel(channel: Channel, patch: Partial<ChannelConfig>) {
-    if (!activeScenario || !editable) return;
-    scenarios.updateChannel(activeScenario.id, channel, patch);
+  function pick(id: string) { bundles.setActive(id); }
+
+  async function remove(b: Escenario) {
+    if (!(await ui.confirm(`Eliminar "${b.name}"`, 'Esta acción no se puede deshacer.', { danger: true }))) return;
+    bundles.remove(b.id);
   }
 
-  function addArtifact(channel: Channel) {
-    if (!activeScenario || !editable) return;
-    const cur = activeScenario.channels[channel].artifacts;
-    const next: ArtifactConfig[] = [...cur, { artifact: 'blink', probability: 0.3 }];
-    scenarios.setChannelArtifacts(activeScenario.id, channel, next);
-  }
-  function updateArtifact(channel: Channel, idx: number, patch: Partial<ArtifactConfig>) {
-    if (!activeScenario || !editable) return;
-    const cur = activeScenario.channels[channel].artifacts;
-    const next = cur.map((a, i) => (i === idx ? { ...a, ...patch } : a));
-    scenarios.setChannelArtifacts(activeScenario.id, channel, next);
-  }
-  function removeArtifact(channel: Channel, idx: number) {
-    if (!activeScenario || !editable) return;
-    const cur = activeScenario.channels[channel].artifacts;
-    scenarios.setChannelArtifacts(activeScenario.id, channel, cur.filter((_, i) => i !== idx));
+  function duplicate(b: Escenario) { bundles.duplicate(b.id); }
+
+  async function rename(b: Escenario) {
+    const name = await ui.prompt('Nuevo nombre', b.name);
+    if (!name) return;
+    bundles.update(b.id, { name });
   }
 
-  const ARTIFACT_OPTIONS: { value: ArtifactKind; label: string }[] = [
-    { value: 'blink', label: 'Parpadeo' },
-    { value: 'slip', label: 'Deslizamiento de gafas' },
-    { value: 'wrong_dir', label: 'Dirección errónea' },
-    { value: 'overshoot', label: 'Sobre-impulso' },
-    { value: 'fixation_loss', label: 'Pérdida de fijación' },
-  ];
+  function setCaso(id: string) {
+    if (!active) return;
+    bundles.update(active.id, { casoId: id });
+  }
+  function setAcceptance(id: string) {
+    if (!active) return;
+    bundles.update(active.id, { acceptanceId: id });
+  }
+  function setEyeset(id: string) {
+    if (!active) return;
+    bundles.update(active.id, { eyesetId: id });
+  }
+
+  let allCasos = $derived([...scenarios.examples, ...scenarios.list]);
+  let casoActive = $derived(active ? allCasos.find((c) => c.id === active.casoId) : null);
+  let acceptanceActive = $derived(active ? acceptance.all.find((a) => a.id === active.acceptanceId) : null);
+  let eyesetActive = $derived(active ? eyeset.sets.find((e) => e.id === active.eyesetId) : null);
 </script>
 
 <div class="app">
@@ -68,145 +59,129 @@
 
   <div class="docente">
     <aside class="left">
-      <a class="ext-link" href="/docente/camara">📷 Editor de cámara →</a>
-
-      <div class="section-title">Casos predefinidos</div>
+      <div class="section-title">Escenarios</div>
+      <button class="primary" onclick={newBundle}>+ Nuevo escenario</button>
       <ul>
-        {#each scenarios.examples as s (s.id)}
-          <li class:active={s.id === scenarios.activeId}>
-            <button class="name" onclick={() => scenarios.setActive(s.id)}>
-              <span class="badge">📚</span>{s.name}
+        {#each bundles.list as b (b.id)}
+          <li class:active={b.id === bundles.activeId}>
+            <button class="name" onclick={() => pick(b.id)}>
+              {#if b.id === bundles.activeId}<span class="dot">●</span>{/if}
+              {b.name}
             </button>
-            <button class="dup" title="Duplicar para editar" onclick={() => scenarios.duplicate(s.id)}>⎘</button>
-          </li>
-        {/each}
-      </ul>
-
-      <div class="section-title">Mis escenarios</div>
-      <button class="primary" onclick={newScenario}>+ Nuevo</button>
-      <ul>
-        {#each scenarios.list as s (s.id)}
-          <li class:active={s.id === scenarios.activeId}>
-            <button class="name" onclick={() => scenarios.setActive(s.id)}>{s.name}</button>
-            <button class="del" onclick={() => deleteScenario(s.id)} title="Eliminar">×</button>
+            <button class="dup" onclick={() => duplicate(b)} title="Duplicar">⎘</button>
+            <button class="del" onclick={() => remove(b)} title="Eliminar">×</button>
           </li>
         {:else}
-          <li class="empty-li">— vacío —</li>
+          <li class="empty-li">— sin escenarios —</li>
         {/each}
       </ul>
     </aside>
 
     <main class="canvas">
-      {#if !activeScenario}
-        <div class="empty">No hay escenarios. Crea uno o selecciona un caso predefinido.</div>
+      {#if !active}
+        <div class="empty">
+          <h2>No hay escenario activo</h2>
+          <p>Un escenario combina un <b>caso clínico</b>, un <b>nivel de dificultad</b> y un <b>set de cámara</b>.</p>
+          <p>Crea uno nuevo para empezar.</p>
+          <button class="primary big" onclick={newBundle}>+ Nuevo escenario</button>
+        </div>
       {:else}
         <header class="hd">
           <div class="hd-title">
-            <h2>{activeScenario.name}</h2>
-            {#if activeScenario.description}
-              <p class="desc">{activeScenario.description}</p>
-            {/if}
+            <h2>{active.name}</h2>
+            <p class="desc">Activo. Las tres partes se aplican al simulador.</p>
           </div>
-          {#if scenarios.isExampleActive}
-            <div class="readonly">
-              <span>📚 Caso predefinido — solo lectura</span>
-              <button class="primary" onclick={duplicateActive}>⎘ Duplicar para editar</button>
-            </div>
-          {/if}
+          <div class="hd-actions">
+            <button onclick={() => rename(active)}>Renombrar</button>
+            <button onclick={() => duplicate(active)}>⎘ Duplicar</button>
+          </div>
         </header>
 
-        <section class="grid">
-          <div class="grp">
-            <div class="grp-title">Canales horizontales</div>
-            <div class="row">
-              {#each HORIZONTAL_CHANNELS as ch (ch)}
-                {@const cfg = activeScenario.channels[ch]}
-                <div class="ch-card">
-                  <div class="ch-hd">
-                    <span class="ch-key">{ch}</span>
-                    <span class="ch-name">{CHANNEL_LABELS[ch]}</span>
-                  </div>
-
-                  <label class="field">
-                    <span class="lbl">Ganancia VOR <em>{cfg.gain.toFixed(2)}</em></span>
-                    <input
-                      type="range" min="0" max="1.5" step="0.05"
-                      value={cfg.gain}
-                      disabled={!editable}
-                      oninput={(e) => updateChannel(ch, { gain: +(e.currentTarget as HTMLInputElement).value })}
-                    />
-                  </label>
-
-                  <label class="field">
-                    <span class="lbl">Velocidad pico <em>{cfg.peakVel} °/s</em></span>
-                    <input
-                      type="range" min="80" max="300" step="5"
-                      value={cfg.peakVel}
-                      disabled={!editable}
-                      oninput={(e) => updateChannel(ch, { peakVel: +(e.currentTarget as HTMLInputElement).value })}
-                    />
-                  </label>
-
-                  <label class="field">
-                    <span class="lbl">Sacada correctiva</span>
-                    <select
-                      value={cfg.saccade}
-                      disabled={!editable}
-                      onchange={(e) => updateChannel(ch, { saccade: (e.currentTarget as HTMLSelectElement).value as ChannelConfig['saccade'] })}
-                    >
-                      <option value="none">Ninguna</option>
-                      <option value="covert">Cubierta</option>
-                      <option value="overt">Manifiesta</option>
-                    </select>
-                  </label>
-
-                  <div class="art">
-                    <div class="art-hd">
-                      <span class="lbl">Artefactos</span>
-                      <button disabled={!editable} onclick={() => addArtifact(ch)}>+ Añadir</button>
-                    </div>
-                    {#if cfg.artifacts.length === 0}
-                      <p class="muted">Sin artefactos (hereda del set de ojos activo).</p>
-                    {/if}
-                    {#each cfg.artifacts as a, i (i)}
-                      <div class="art-row">
-                        <select
-                          value={a.artifact}
-                          disabled={!editable}
-                          onchange={(e) => updateArtifact(ch, i, { artifact: (e.currentTarget as HTMLSelectElement).value as ArtifactKind })}
-                        >
-                          {#each ARTIFACT_OPTIONS as opt}
-                            <option value={opt.value}>{opt.label}</option>
-                          {/each}
-                        </select>
-                        <input
-                          type="number" min="0" max="1" step="0.05"
-                          value={a.probability}
-                          disabled={!editable}
-                          oninput={(e) => updateArtifact(ch, i, { probability: +(e.currentTarget as HTMLInputElement).value })}
-                        />
-                        <button class="del" disabled={!editable} onclick={() => removeArtifact(ch, i)}>×</button>
-                      </div>
-                    {/each}
-                  </div>
-                </div>
-              {/each}
+        <section class="parts">
+          <!-- Parte 1: Caso clínico -->
+          <div class="part">
+            <div class="part-head">
+              <h3>🩺 Caso clínico</h3>
+              <a class="edit-link" href="/docente/caso">Editar →</a>
             </div>
+            <select value={active.casoId} oninput={(e) => setCaso((e.currentTarget as HTMLSelectElement).value)}>
+              <option value="">— seleccionar —</option>
+              {#if scenarios.examples.length}
+                <optgroup label="📚 Predefinidos">
+                  {#each scenarios.examples as c (c.id)}
+                    <option value={c.id}>{c.name}</option>
+                  {/each}
+                </optgroup>
+              {/if}
+              {#if scenarios.list.length}
+                <optgroup label="Mis casos">
+                  {#each scenarios.list as c (c.id)}
+                    <option value={c.id}>{c.name}</option>
+                  {/each}
+                </optgroup>
+              {/if}
+            </select>
+            {#if casoActive}
+              <div class="summary">
+                {#if casoActive.description}<p class="summary-desc">{casoActive.description}</p>{/if}
+                <div class="summary-grid">
+                  <div><span>LL</span> gain {casoActive.channels.LL.gain.toFixed(2)} · {casoActive.channels.LL.peakVel}°/s · sacada {casoActive.channels.LL.saccade}</div>
+                  <div><span>RL</span> gain {casoActive.channels.RL.gain.toFixed(2)} · {casoActive.channels.RL.peakVel}°/s · sacada {casoActive.channels.RL.saccade}</div>
+                </div>
+              </div>
+            {:else}
+              <p class="muted">Selecciona un caso clínico.</p>
+            {/if}
           </div>
 
-          <div class="grp">
-            <div class="grp-title">Canales verticales <span class="soon">próximamente</span></div>
-            <div class="row">
-              {#each VERTICAL_CHANNELS as ch (ch)}
-                <div class="ch-card disabled">
-                  <div class="ch-hd">
-                    <span class="ch-key">{ch}</span>
-                    <span class="ch-name">{CHANNEL_LABELS[ch]}</span>
-                  </div>
-                  <p class="muted">Disponible cuando la cámara detecte movimientos verticales.</p>
-                </div>
-              {/each}
+          <!-- Parte 2: Nivel de aceptación -->
+          <div class="part">
+            <div class="part-head">
+              <h3>🎓 Nivel de dificultad</h3>
+              <a class="edit-link" href="/docente/dificultad">Editar →</a>
             </div>
+            <select value={active.acceptanceId} oninput={(e) => setAcceptance((e.currentTarget as HTMLSelectElement).value)}>
+              <optgroup label="📚 Predefinidos">
+                {#each acceptance.all.filter((p) => p.builtin) as p (p.id)}
+                  <option value={p.id}>{p.name}</option>
+                {/each}
+              </optgroup>
+              {#if acceptance.all.some((p) => !p.builtin)}
+                <optgroup label="Mis niveles">
+                  {#each acceptance.all.filter((p) => !p.builtin) as p (p.id)}
+                    <option value={p.id}>{p.name}</option>
+                  {/each}
+                </optgroup>
+              {/if}
+            </select>
+            {#if acceptanceActive}
+              <div class="summary-grid">
+                <div><span>Pose</span> ±{acceptanceActive.yawTol}° / ±{acceptanceActive.pitchTol}° / ±{acceptanceActive.rollTol}°</div>
+                <div><span>Pico</span> {acceptanceActive.peakMin}–{acceptanceActive.peakMax} °/s</div>
+                <div><span>Desplaz.</span> {acceptanceActive.ampMin}–{acceptanceActive.ampMax}°</div>
+                <div><span>Ganancia</span> {acceptanceActive.gainMin.toFixed(2)}–{acceptanceActive.gainMax.toFixed(2)}</div>
+                <div><span>Duración</span> {acceptanceActive.durMinMs}–{acceptanceActive.durMaxMs} ms</div>
+              </div>
+            {/if}
+          </div>
+
+          <!-- Parte 3: Set de cámara -->
+          <div class="part">
+            <div class="part-head">
+              <h3>📷 Set de cámara</h3>
+              <a class="edit-link" href="/docente/camara">Editar →</a>
+            </div>
+            <select value={active.eyesetId} oninput={(e) => setEyeset((e.currentTarget as HTMLSelectElement).value)}>
+              {#each eyeset.sets as s (s.id)}
+                <option value={s.id}>{s.name}</option>
+              {/each}
+            </select>
+            {#if eyesetActive}
+              {@const total = (eyesetActive.centerFrame ? 1 : 0)
+                + Object.values(eyesetActive.rays).reduce((a, r) => a + r.length, 0)
+                + eyesetActive.blink.length}
+              <p class="muted small">{total} frames</p>
+            {/if}
           </div>
         </section>
       {/if}
@@ -215,108 +190,89 @@
 </div>
 
 <style>
-  .app { height: 100vh; display: flex; flex-direction: column; }
-  .docente {
-    flex: 1;
-    display: grid;
-    grid-template-columns: 240px 1fr;
-    min-height: 0;
-  }
+  .app { min-height: 100vh; background: var(--bg); display: flex; flex-direction: column; }
+  .docente { flex: 1; display: grid; grid-template-columns: 280px 1fr; gap: 12px; padding: 12px; }
   aside.left {
-    background: var(--surface);
-    border-right: 1px solid var(--border);
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 8px;
     overflow-y: auto;
-    padding: 12px;
-    display: flex; flex-direction: column; gap: 8px;
   }
-  .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); font-weight: 600; }
-  .left ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-  .left li { display: flex; align-items: center; gap: 4px; border-radius: var(--radius-sm); overflow: hidden; }
-  .left li.active { background: var(--primary-soft); }
-  .left li .name {
-    flex: 1; text-align: left; padding: 6px 8px;
-    background: transparent; border: none; color: var(--text);
-    font-size: 12px;
+  .section-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted);
+    margin-top: 4px; padding-bottom: 4px; border-bottom: 1px solid var(--border);
   }
-  .left li.active .name { color: var(--primary); font-weight: 600; }
-  .left li .del, .left li .dup {
-    padding: 4px 8px; background: transparent; border: none;
-    color: var(--text-muted); font-size: 14px;
+  ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  li {
+    display: flex; align-items: center; gap: 4px; padding: 4px;
+    border-radius: var(--radius-sm); border: 1px solid transparent;
   }
-  .left li .del:hover { color: var(--danger); }
-  .left li .dup:hover { color: var(--primary); }
-  .left .badge { font-size: 10px; margin-right: 4px; }
-  .left .empty-li { padding: 6px 8px; font-size: 11px; color: var(--text-muted); font-style: italic; text-align: center; }
-  .ext-link {
-    display: block; padding: 8px 10px;
-    background: var(--accent-soft); color: var(--accent);
-    border-radius: var(--radius-sm); text-decoration: none;
-    font-size: 12px; font-weight: 600;
-    border: 1px solid var(--accent); text-align: center;
-    transition: background .15s;
+  li.active { background: var(--primary-soft); border-color: var(--primary); }
+  li.empty-li { color: var(--text-muted); font-size: 12px; padding: 6px 4px; font-style: italic; }
+  .name {
+    flex: 1; text-align: left; padding: 4px 6px; font-size: 13px;
+    background: transparent; border: none; cursor: pointer; color: inherit;
   }
-  .ext-link:hover { background: var(--accent); color: white; }
+  .name:hover { color: var(--primary); }
+  .dot { color: var(--success); margin-right: 4px; }
+  .dup, .del {
+    width: 22px; height: 22px; padding: 0; font-size: 14px; line-height: 1;
+    background: transparent; border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
+  }
+  .dup:hover { border-color: var(--primary); color: var(--primary); }
+  .del:hover { background: var(--danger); color: white; border-color: var(--danger); }
+  button.primary {
+    background: var(--primary); color: white; border: none; padding: 6px 10px;
+    border-radius: var(--radius-sm); font-size: 12px; cursor: pointer;
+  }
+  button.primary.big { padding: 10px 16px; font-size: 14px; margin-top: 12px; }
 
-  .canvas { overflow: auto; padding: 16px 24px 32px; background: var(--bg); }
-  .empty { padding: 60px 20px; text-align: center; color: var(--text-muted); }
-
-  .hd { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
-  .hd h2 { margin: 0; font-size: 18px; }
-  .hd .desc { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); max-width: 600px; }
-  .readonly {
-    display: flex; align-items: center; gap: 10px;
-    background: var(--surface); border: 1px solid var(--border-strong);
-    border-radius: 999px; padding: 4px 6px 4px 14px;
-    font-size: 12px; box-shadow: var(--shadow);
+  main.canvas {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 12px;
+    overflow-y: auto;
   }
-  .readonly button { font-size: 11px; padding: 4px 10px; border-radius: 999px; }
+  .empty { text-align: center; padding: 40px 20px; color: var(--text-muted); }
+  .empty h2 { color: var(--text); margin-bottom: 12px; }
+  .empty p { margin: 4px 0; }
 
-  .grid { display: flex; flex-direction: column; gap: 16px; }
-  .grp { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
-  .grp-title {
-    font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
-    color: var(--text-muted); font-weight: 600;
-    margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+  .hd { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .hd-title h2 { margin: 0 0 4px; font-size: 18px; }
+  .hd-title .desc { margin: 0; color: var(--text-muted); font-size: 12px; }
+  .hd-actions { display: flex; gap: 6px; }
+  .hd-actions button {
+    background: var(--surface-2); border: 1px solid var(--border); padding: 6px 10px;
+    border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; color: inherit;
   }
-  .grp-title .soon {
-    background: var(--surface-2); color: var(--text-muted);
-    font-size: 9px; padding: 2px 6px; border-radius: 999px;
-    text-transform: none; letter-spacing: 0; font-weight: 500;
-  }
-  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .hd-actions button:hover { border-color: var(--primary); }
 
-  .ch-card {
-    background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: var(--radius-sm); padding: 12px;
-    display: flex; flex-direction: column; gap: 10px;
+  .parts { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  @media (min-width: 1100px) { .parts { grid-template-columns: 1fr 1fr; } }
+  .part {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 12px; display: flex; flex-direction: column; gap: 8px;
   }
-  .ch-card.disabled { opacity: .5; pointer-events: none; }
-  .ch-hd { display: flex; align-items: baseline; gap: 8px; }
-  .ch-key { font-family: ui-monospace, monospace; font-weight: 700; font-size: 14px; color: var(--primary); }
-  .ch-name { font-size: 12px; color: var(--text-muted); }
-
-  .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
-  .field .lbl { color: var(--text-muted); font-size: 11px; display: flex; justify-content: space-between; }
-  .field .lbl em { color: var(--text); font-style: normal; font-family: ui-monospace, monospace; font-weight: 600; }
-  .field input[type="range"] { width: 100%; }
-  .field select {
-    padding: 4px 6px; border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm); background: var(--surface);
-    color: var(--text); font-size: 12px;
+  .part-head { display: flex; justify-content: space-between; align-items: center; }
+  .part-head h3 { margin: 0; font-size: 13px; color: var(--primary); }
+  .edit-link {
+    font-size: 11px; color: var(--text-muted); text-decoration: none;
+    padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px;
   }
-
-  .art { border-top: 1px dashed var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
-  .art-hd { display: flex; justify-content: space-between; align-items: center; }
-  .art-hd button { font-size: 11px; padding: 3px 8px; }
-  .art-row { display: grid; grid-template-columns: 1fr 70px auto; gap: 6px; align-items: center; }
-  .art-row select, .art-row input {
-    padding: 3px 6px; border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm); background: var(--surface);
-    color: var(--text); font-size: 11px;
+  .edit-link:hover { color: var(--primary); border-color: var(--primary); }
+  select {
+    font: inherit; font-size: 13px; padding: 6px 10px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    background: var(--surface); color: var(--text); width: 100%;
   }
-  .art-row .del { background: transparent; border: none; color: var(--text-muted); font-size: 16px; padding: 0 4px; }
-  .art-row .del:hover { color: var(--danger); }
-  .muted { color: var(--text-muted); font-size: 11px; font-style: italic; margin: 0; }
-
-  button:disabled { opacity: .4; cursor: not-allowed; }
+  .summary { display: flex; flex-direction: column; gap: 4px; }
+  .summary-desc { margin: 0; color: var(--text-muted); font-size: 12px; font-style: italic; }
+  .summary-grid {
+    display: grid; gap: 4px; font-size: 12px; color: var(--text);
+  }
+  .summary-grid div { display: flex; gap: 6px; }
+  .summary-grid span {
+    color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase;
+    min-width: 70px;
+  }
+  .muted { color: var(--text-muted); font-size: 12px; margin: 0; }
+  .small { font-size: 11px; }
 </style>

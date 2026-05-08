@@ -1,6 +1,7 @@
 import type { Scenario, ArtifactConfig, Channel, ChannelConfig } from '$lib/scenario.svelte';
 import { eyeset } from '$lib/eyeset.svelte';
 import { serial } from '$lib/serial.svelte';
+import { acceptance } from '$lib/acceptance.svelte';
 
 export type Impulse = {
   id: number;
@@ -21,18 +22,33 @@ export type ImpulseTrigger = {
 
 const FS = 200;
 
-// Heurística simple de aceptación de impulso (M1 — refinar en M3)
+// Integra |velocidad| trapezoidalmente para obtener desplazamiento (°).
+function integrateAmplitude(t: Float64Array, head: Float64Array): number {
+  if (t.length < 2) return 0;
+  let acc = 0;
+  for (let i = 1; i < t.length; i++) {
+    const dt = (t[i] - t[i - 1]) / 1000; // ms -> s
+    acc += 0.5 * (Math.abs(head[i]) + Math.abs(head[i - 1])) * dt;
+  }
+  return acc;
+}
+
+// Heurística simple de aceptación de impulso. Rangos configurables vía
+// store `acceptance` (presets principiante / estándar / avanzado / custom).
 function evaluateImpulse(imp: Impulse, peakHead: number, gain: number) {
+  const cfg = acceptance.active;
   const reasons: string[] = [];
-  if (peakHead < 100) reasons.push('pico bajo (<100°/s)');
-  if (peakHead > 280) reasons.push('pico excesivo (>280°/s)');
-  if (gain < 0.4) reasons.push('ganancia muy baja');
-  if (gain > 1.4) reasons.push('ganancia anómala');
-  // duración aproximada por nº de muestras del impulso
+  if (peakHead < cfg.peakMin) reasons.push(`pico bajo (<${cfg.peakMin}°/s)`);
+  if (peakHead > cfg.peakMax) reasons.push(`pico excesivo (>${cfg.peakMax}°/s)`);
+  if (gain < cfg.gainMin) reasons.push('ganancia muy baja');
+  if (gain > cfg.gainMax) reasons.push('ganancia anómala');
   const durMs = imp.t.length ? imp.t[imp.t.length - 1] - imp.t[0] : 0;
-  if (durMs < 80) reasons.push('duración corta');
-  if (durMs > 260) reasons.push('duración larga');
-  return { ok: reasons.length === 0, reasons, peak: peakHead, gain };
+  if (durMs < cfg.durMinMs) reasons.push('duración corta');
+  if (durMs > cfg.durMaxMs) reasons.push('duración larga');
+  const amp = integrateAmplitude(imp.t, imp.head);
+  if (amp < cfg.ampMin) reasons.push(`desplazamiento bajo (<${cfg.ampMin}°)`);
+  if (amp > cfg.ampMax) reasons.push(`desplazamiento alto (>${cfg.ampMax}°)`);
+  return { ok: reasons.length === 0, reasons, peak: peakHead, gain, amp };
 }
 const WINDOW_S = 5;
 const N = FS * WINDOW_S;
@@ -68,7 +84,7 @@ class Simulator {
   headRoll = $state(0);   // °, neutro = 0; oreja-hombro izq < 0; der > 0
   // Veredicto del último impulso capturado
   lastImpulse = $state<Impulse | null>(null);
-  lastVerdict = $state<{ ok: boolean; reasons: string[]; peak: number; gain: number } | null>(null);
+  lastVerdict = $state<{ ok: boolean; reasons: string[]; peak: number; gain: number; amp: number } | null>(null);
 
   // alias para no romper API previa
   get running() { return this.mode !== 'idle'; }
