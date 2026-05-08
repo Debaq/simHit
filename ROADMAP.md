@@ -50,6 +50,13 @@ Objetivo: que el operador pueda ejecutar los impulsos con retroalimentación inm
 - [ ] Clasificador de artefactos (parpadeo, movimiento previo, doble pico, pérdida de tracking).
 - [ ] Auto-descarte de pruebas inválidas con opción a recuperar.
 
+### UX del panel de captura  ✅
+- [x] Botones del panel "Captura en vivo" en línea (sin fila separada de selector + estado).
+- [x] Botón principal cambia a "Iniciar/Detener demo" cuando SimHit no está conectado (modo simulado puro), y a "Iniciar/Detener test" con hardware real.
+- [x] "Modo libre" disponible también en demo (ya no requiere SimHit).
+- [x] Bloqueo de "Iniciar test" y "Modo libre" si SimHit está conectado pero aún no calibrado (`serial.calibrated`), con tooltip explicativo. Flag se setea con `IMU CAL done` y se resetea en connect/disconnect/`IMU CAL fail`.
+- [x] "Limpiar" deshabilitado cuando no hay impulsos.
+
 ### Guía de protocolo  ⏳
 - [ ] Plan de captura por canal con contador objetivo (LL: 10/15, RL: 8/15…).
 - [ ] Indicador visual del lado a estimular en la próxima prueba (modo aleatorio).

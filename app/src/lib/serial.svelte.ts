@@ -54,6 +54,8 @@ class SerialStore {
   lastCalLine = $state<string>('');
   // log completo de la última corrida de MAG CAL (para diagnóstico)
   magCalLog = $state<string[]>([]);
+  // true tras "IMU CAL done"; false al conectar/desconectar
+  calibrated = $state(false);
   // valores parseados (yaw/pitch/roll + gyro xyz, ya en ° y °/s)
   angle = $state<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
   gyro = $state<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
@@ -99,6 +101,7 @@ class SerialStore {
     if (this.connected || this.connecting) return;
     this.connecting = true;
     this.lastError = null;
+    this.calibrated = false;
     try {
       this.sp = new SerialPort({ path, baudRate: FIRMWARE_BAUD });
       await this.sp.open();
@@ -132,6 +135,7 @@ class SerialStore {
     this.connected = false;
     this.portPath = null;
     this.buffer = '';
+    this.calibrated = false;
   }
 
   async sendCommand(cmd: string) {
@@ -170,6 +174,8 @@ class SerialStore {
     this.lastLine = line;
     if (line.startsWith('IMU CAL ') || line.startsWith('MAG CAL ')) {
       this.lastCalLine = line;
+      if (line.startsWith('IMU CAL done')) this.calibrated = true;
+      else if (line.startsWith('IMU CAL fail')) this.calibrated = false;
       // Capturar todas las líneas de MAG CAL para diagnóstico.
       if (line.startsWith('MAG CAL ')) {
         const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
