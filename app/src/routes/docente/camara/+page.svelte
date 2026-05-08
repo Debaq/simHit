@@ -6,6 +6,16 @@
     type RayKey, type FrameRef, type Frame,
   } from '$lib/eyeset.svelte';
   import { frameRefEq } from '$lib/eyeset.svelte';
+  import type { ArtifactKind } from '$lib/scenario.svelte';
+
+  const ARTIFACT_LABELS: Record<ArtifactKind, string> = {
+    blink: 'Parpadeo',
+    slip: 'Deslizamiento gafas',
+    wrong_dir: 'Dirección errada',
+    overshoot: 'Overshoot ojo',
+    fixation_loss: 'Pérdida fijación',
+  };
+  const ARTIFACT_KINDS: ArtifactKind[] = ['blink', 'slip', 'wrong_dir', 'overshoot', 'fixation_loss'];
 
   let selected = $state<FrameRef>({ kind: 'center' });
   onMount(() => eyeset.load());
@@ -326,6 +336,35 @@
         {/if}
       </aside>
     </div>
+
+    <section class="artifacts">
+      <header class="art-head">
+        <h2>Artefactos del set</h2>
+        <p class="muted">Probabilidad de aparición durante cada impulso. Heredados por todos los casos que usen este set, salvo override por nodo impulse.</p>
+      </header>
+      {#if active}
+        {#if active.artifacts.length === 0}
+          <em class="empty-art">— sin artefactos definidos —</em>
+        {:else}
+          <ul class="art-list">
+            {#each active.artifacts as a, i}
+              <li class="art-row">
+                <select value={a.artifact} onchange={(e) => eyeset.updateArtifact(active!.id, i, { artifact: (e.target as HTMLSelectElement).value as ArtifactKind })}>
+                  {#each ARTIFACT_KINDS as k}
+                    <option value={k}>{ARTIFACT_LABELS[k]}</option>
+                  {/each}
+                </select>
+                <input type="range" min="0" max="1" step="0.05" value={a.probability}
+                       oninput={(e) => eyeset.updateArtifact(active!.id, i, { probability: +(e.target as HTMLInputElement).value })} />
+                <span class="prob">{(a.probability * 100).toFixed(0)}%</span>
+                <button class="del-mini" onclick={() => eyeset.removeArtifact(active!.id, i)} title="Quitar">×</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        <button class="add-art" onclick={() => eyeset.addArtifact(active!.id, { artifact: 'blink', probability: 0.3 })}>+ Agregar artefacto</button>
+      {/if}
+    </section>
   </main>
 </div>
 
@@ -557,4 +596,18 @@
   .placeholder.big-ph { font-size: 13px; padding: 20px; text-align: center; }
   .crosshair { position: absolute; width: 32px; height: 32px; transform: translate(-50%, -50%); pointer-events: none; color: var(--primary); filter: drop-shadow(0 0 1px white); }
   .crosshair svg { width: 100%; height: 100%; }
+
+  .artifacts { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; margin-top: 16px; }
+  .artifacts .art-head h2 { margin: 0 0 4px; font-size: 15px; }
+  .artifacts .art-head .muted { font-size: 11px; max-width: 720px; }
+  .empty-art { display: block; padding: 12px 0; color: var(--text-muted); font-style: italic; font-size: 12px; }
+  .art-list { list-style: none; margin: 8px 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; max-width: 720px; }
+  .art-row { display: grid; grid-template-columns: 240px 1fr 50px 28px; gap: 10px; align-items: center; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .art-row select { font: inherit; font-size: 12px; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+  .art-row input[type="range"] { accent-color: var(--primary); }
+  .art-row .prob { font-family: ui-monospace, monospace; font-size: 11px; color: var(--primary); font-weight: 600; text-align: right; }
+  .del-mini { background: transparent; border: 1px solid var(--border); color: var(--text-muted); border-radius: 50%; width: 24px; height: 24px; padding: 0; line-height: 1; font-size: 14px; cursor: pointer; }
+  .del-mini:hover { color: var(--danger); border-color: var(--danger); }
+  .add-art { font-size: 12px; padding: 6px 12px; background: var(--primary-soft); color: var(--primary); border: 1px dashed var(--primary); border-radius: var(--radius-sm); cursor: pointer; }
+  .add-art:hover { background: var(--primary); color: white; }
 </style>

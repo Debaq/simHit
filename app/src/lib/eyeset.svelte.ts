@@ -16,6 +16,7 @@
 // Sus frames se exponen con spriteY (background-position-y %) en lugar de url.
 
 import { storage } from './storage';
+import type { ArtifactConfig } from './scenario.svelte';
 
 export type FrameAnnotation = { pupilX: number; pupilY: number };
 
@@ -53,6 +54,9 @@ export type EyeSet = {
   centerFrame: Frame | null;
   rays: Record<RayKey, Frame[]>;
   blink: Frame[];
+  // Artefactos por defecto del set. Cada impulso que use este set hereda esta lista,
+  // salvo que el nodo impulse defina su propio override.
+  artifacts: ArtifactConfig[];
 };
 
 const EYESETS_DIR = 'eyesets';
@@ -95,6 +99,7 @@ function makeBuiltin(): EyeSet {
       { id: 'b-bk-3', pupilX: 0, pupilY: 0, spriteY: spriteY(10) },
       { id: 'b-bk-4', pupilX: 0, pupilY: 0, spriteY: spriteY(11) },
     ],
+    artifacts: [],
   };
 }
 
@@ -113,6 +118,7 @@ type StoredEyeSetMetaV2 = {
   centerFrame: StoredFrame | null;
   rays: Record<RayKey, StoredFrame[]>;
   blink: StoredFrame[];
+  artifacts?: ArtifactConfig[];
 };
 // V1 (legacy) format
 type StoredEyeSetMetaV1 = {
@@ -136,6 +142,7 @@ class EyeSetStore {
   async load() {
     const builtin = makeBuiltin();
     await this.applyBuiltinPupils(builtin);
+    await this.loadBuiltinArtifacts(builtin);
 
     // migrar custom sets desde localStorage si fs vacío
     const dirEntries = await storage.list(EYESETS_DIR);
@@ -235,6 +242,7 @@ class EyeSetStore {
           centerFrame: null,
           rays: emptyRays(),
           blink: [],
+          artifacts: [],
         };
         const newId = () => crypto.randomUUID();
         const mkFrame = async (idx: number, pupil: FrameAnnotation | null): Promise<Frame | null> => {
@@ -300,6 +308,7 @@ class EyeSetStore {
       centerFrame: meta.centerFrame ? await loadFrame(meta.centerFrame) : null,
       rays: emptyRays(),
       blink: [],
+      artifacts: Array.isArray(meta.artifacts) ? meta.artifacts.map((a) => ({ ...a })) : [],
     };
     for (const k of RAY_KEYS) {
       const arr = meta.rays?.[k] ?? [];
@@ -318,6 +327,7 @@ class EyeSetStore {
       centerFrame: null,
       rays: emptyRays(),
       blink: [],
+      artifacts: [],
     };
     const moveFrame = async (idx: number): Promise<Frame | null> => {
       if (!has[idx]) return null;
@@ -355,6 +365,7 @@ class EyeSetStore {
       centerFrame: null,
       rays: emptyRays(),
       blink: [],
+      artifacts: [],
     };
     this.sets = [...this.sets, s];
     this.activeId = s.id;
@@ -373,6 +384,7 @@ class EyeSetStore {
       centerFrame: src.centerFrame ? { ...src.centerFrame, id: crypto.randomUUID(), url: undefined } : null,
       rays: emptyRays(),
       blink: [],
+      artifacts: src.artifacts.map((a) => ({ ...a })),
     };
     for (const k of RAY_KEYS) {
       copy.rays[k] = src.rays[k].map((f) => ({ ...f, id: crypto.randomUUID(), url: undefined }));
@@ -576,8 +588,49 @@ class EyeSetStore {
         downRight: s.rays.downRight.map(toStored),
       },
       blink: s.blink.map(toStored),
+      artifacts: s.artifacts.map((a) => ({ ...a })),
     };
     await storage.writeJson(`${EYESETS_DIR}/${s.id}/meta.json`, meta);
+  }
+
+  // ── Artefactos ───────────────────────────────────────────────────────────
+
+  private async persistArtifacts(s: EyeSet) {
+    if (s.builtin) {
+      await storage.writeJson(`${EYESETS_DIR}/${BUILTIN_ID}/artifacts.json`, s.artifacts);
+    } else {
+      await this.persistMeta(s);
+    }
+  }
+
+  addArtifact(setId: string, cfg: ArtifactConfig) {
+    const s = this.sets.find((x) => x.id === setId);
+    if (!s) return;
+    s.artifacts = [...s.artifacts, { ...cfg }];
+    this.sets = [...this.sets];
+    void this.persistArtifacts(s);
+  }
+  updateArtifact(setId: string, index: number, patch: Partial<ArtifactConfig>) {
+    const s = this.sets.find((x) => x.id === setId);
+    if (!s) return;
+    const arr = [...s.artifacts];
+    if (!arr[index]) return;
+    arr[index] = { ...arr[index], ...patch };
+    s.artifacts = arr;
+    this.sets = [...this.sets];
+    void this.persistArtifacts(s);
+  }
+  removeArtifact(setId: string, index: number) {
+    const s = this.sets.find((x) => x.id === setId);
+    if (!s) return;
+    s.artifacts = s.artifacts.filter((_, i) => i !== index);
+    this.sets = [...this.sets];
+    void this.persistArtifacts(s);
+  }
+
+  private async loadBuiltinArtifacts(builtin: EyeSet) {
+    const arr = await storage.readJson<ArtifactConfig[]>(`${EYESETS_DIR}/${BUILTIN_ID}/artifacts.json`);
+    if (Array.isArray(arr)) builtin.artifacts = arr.map((a) => ({ ...a }));
   }
 }
 

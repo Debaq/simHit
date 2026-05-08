@@ -1,127 +1,66 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import {
-    SvelteFlow,
-    Controls,
-    Background,
-    BackgroundVariant,
-    MiniMap,
-    type Node,
-    type Edge,
-    type Connection,
-    useSvelteFlow,
-  } from '@xyflow/svelte';
-  import '@xyflow/svelte/dist/style.css';
-
   import TopBar from '$lib/components/TopBar.svelte';
-  import Palette from '$lib/components/flow/Palette.svelte';
-  import Inspector from '$lib/components/flow/Inspector.svelte';
-  import FlowOps from '$lib/components/flow/FlowOps.svelte';
-  import StartNode from '$lib/components/flow/StartNode.svelte';
-  import EndNode from '$lib/components/flow/EndNode.svelte';
-  import ImpulseNode from '$lib/components/flow/ImpulseNode.svelte';
-  import PauseNode from '$lib/components/flow/PauseNode.svelte';
-  import ArtifactNode from '$lib/components/flow/ArtifactNode.svelte';
-  import RandomNode from '$lib/components/flow/RandomNode.svelte';
-  import { scenarios, defaultsFor, type NodeKind } from '$lib/scenario.svelte';
+  import {
+    scenarios,
+    HORIZONTAL_CHANNELS,
+    VERTICAL_CHANNELS,
+    CHANNEL_LABELS,
+    type Channel,
+    type ChannelConfig,
+    type ArtifactKind,
+    type ArtifactConfig,
+  } from '$lib/scenario.svelte';
 
-  const nodeTypes = {
-    start: StartNode,
-    end: EndNode,
-    impulse: ImpulseNode,
-    pause: PauseNode,
-    artifact: ArtifactNode,
-    random: RandomNode,
-  };
+  onMount(() => { scenarios.load(); });
 
-  let nodes = $state<Node[]>([]);
-  let edges = $state<Edge[]>([]);
-  let selectedId = $state<string | null>(null);
-  let selectedNode = $derived(nodes.find((n) => n.id === selectedId) ?? null);
-
-  let flowWrap: HTMLDivElement;
-  let sf: ReturnType<typeof useSvelteFlow> | null = null;
-
-  let saveTimer: ReturnType<typeof setTimeout> | undefined;
-  function scheduleSave() {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => scenarios.updateActive(nodes, edges), 300);
-  }
-
-  onMount(() => {
-    scenarios.load();
-    syncFromActive();
-  });
-
-  function syncFromActive() {
-    const s = scenarios.active;
-    if (!s) { nodes = []; edges = []; return; }
-    nodes = s.nodes.map((n) => ({ ...n }));
-    edges = s.edges.map((e) => ({ ...e }));
-  }
-
-  $effect(() => {
-    // when active scenario changes, re-sync (track id only)
-    void scenarios.activeId;
-    syncFromActive();
-  });
-
-  $effect(() => {
-    // persist on change
-    void nodes; void edges;
-    if (scenarios.active) scheduleSave();
-  });
-
-  function onConnect(c: Connection) {
-    edges = [...edges, { id: crypto.randomUUID(), source: c.source!, target: c.target!, sourceHandle: c.sourceHandle, targetHandle: c.targetHandle }];
-  }
-
-  function handleDrop(e: DragEvent) {
-    e.preventDefault();
-    const kind = e.dataTransfer?.getData('application/simhit-node') as NodeKind | undefined;
-    if (!kind || !sf) return;
-    const pos = sf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-    const id = crypto.randomUUID();
-    nodes = [...nodes, {
-      id,
-      type: kind,
-      position: pos,
-      data: defaultsFor(kind) as any,
-    }];
-  }
-  function handleDragOver(e: DragEvent) {
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-  }
-
-  function onNodeClick({ node }: { node: Node }) {
-    selectedId = node.id;
-  }
-
-  function updateSelectedData(data: any) {
-    if (!selectedId) return;
-    nodes = nodes.map((n) => (n.id === selectedId ? { ...n, data } : n));
-  }
-  function deleteSelected() {
-    if (!selectedId) return;
-    if (selectedId === 'start' || selectedId === 'end') return;
-    nodes = nodes.filter((n) => n.id !== selectedId);
-    edges = edges.filter((e) => e.source !== selectedId && e.target !== selectedId);
-    selectedId = null;
-  }
+  let activeScenario = $derived(scenarios.active);
+  let editable = $derived(!!activeScenario && !scenarios.isExampleActive);
 
   function newScenario() {
     const name = prompt('Nombre del escenario', 'Nuevo escenario');
     if (!name) return;
     scenarios.create(name);
-    syncFromActive();
   }
   function deleteScenario(id: string) {
     if (!confirm('¿Eliminar escenario?')) return;
     scenarios.remove(id);
-    syncFromActive();
+  }
+  function duplicateActive() {
+    if (!activeScenario) return;
+    scenarios.duplicate(activeScenario.id);
   }
 
+  function updateChannel(channel: Channel, patch: Partial<ChannelConfig>) {
+    if (!activeScenario || !editable) return;
+    scenarios.updateChannel(activeScenario.id, channel, patch);
+  }
+
+  function addArtifact(channel: Channel) {
+    if (!activeScenario || !editable) return;
+    const cur = activeScenario.channels[channel].artifacts;
+    const next: ArtifactConfig[] = [...cur, { artifact: 'blink', probability: 0.3 }];
+    scenarios.setChannelArtifacts(activeScenario.id, channel, next);
+  }
+  function updateArtifact(channel: Channel, idx: number, patch: Partial<ArtifactConfig>) {
+    if (!activeScenario || !editable) return;
+    const cur = activeScenario.channels[channel].artifacts;
+    const next = cur.map((a, i) => (i === idx ? { ...a, ...patch } : a));
+    scenarios.setChannelArtifacts(activeScenario.id, channel, next);
+  }
+  function removeArtifact(channel: Channel, idx: number) {
+    if (!activeScenario || !editable) return;
+    const cur = activeScenario.channels[channel].artifacts;
+    scenarios.setChannelArtifacts(activeScenario.id, channel, cur.filter((_, i) => i !== idx));
+  }
+
+  const ARTIFACT_OPTIONS: { value: ArtifactKind; label: string }[] = [
+    { value: 'blink', label: 'Parpadeo' },
+    { value: 'slip', label: 'Deslizamiento de gafas' },
+    { value: 'wrong_dir', label: 'Dirección errónea' },
+    { value: 'overshoot', label: 'Sobre-impulso' },
+    { value: 'fixation_loss', label: 'Pérdida de fijación' },
+  ];
 </script>
 
 <div class="app">
@@ -130,6 +69,7 @@
   <div class="docente">
     <aside class="left">
       <a class="ext-link" href="/docente/camara">📷 Editor de cámara →</a>
+
       <div class="section-title">Casos predefinidos</div>
       <ul>
         {#each scenarios.examples as s (s.id)}
@@ -137,7 +77,7 @@
             <button class="name" onclick={() => scenarios.setActive(s.id)}>
               <span class="badge">📚</span>{s.name}
             </button>
-            <button class="dup" title="Duplicar para editar" onclick={() => { scenarios.duplicate(s.id); syncFromActive(); }}>⎘</button>
+            <button class="dup" title="Duplicar para editar" onclick={() => scenarios.duplicate(s.id)}>⎘</button>
           </li>
         {/each}
       </ul>
@@ -156,40 +96,121 @@
       </ul>
     </aside>
 
-    <div class="canvas" bind:this={flowWrap} ondrop={handleDrop} ondragover={handleDragOver}>
-      {#if scenarios.isExampleActive}
-        <div class="readonly-banner">
-          <span>📚 Caso predefinido — solo lectura</span>
-          <button class="primary" onclick={() => { scenarios.duplicate(scenarios.activeId!); syncFromActive(); }}>
-            ⎘ Duplicar para editar
-          </button>
-        </div>
-      {/if}
-      {#if scenarios.active}
-        <SvelteFlow
-          bind:nodes
-          bind:edges
-          {nodeTypes}
-          onconnect={onConnect}
-          onnodeclick={onNodeClick}
-          fitView
-          deleteKey={['Backspace', 'Delete']}
-        >
-          <FlowOps onReady={(s) => (sf = s)} />
-          <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-          <Controls />
-          <MiniMap zoomable pannable />
-        </SvelteFlow>
+    <main class="canvas">
+      {#if !activeScenario}
+        <div class="empty">No hay escenarios. Crea uno o selecciona un caso predefinido.</div>
       {:else}
-        <div class="empty">No hay escenarios</div>
-      {/if}
-    </div>
+        <header class="hd">
+          <div class="hd-title">
+            <h2>{activeScenario.name}</h2>
+            {#if activeScenario.description}
+              <p class="desc">{activeScenario.description}</p>
+            {/if}
+          </div>
+          {#if scenarios.isExampleActive}
+            <div class="readonly">
+              <span>📚 Caso predefinido — solo lectura</span>
+              <button class="primary" onclick={duplicateActive}>⎘ Duplicar para editar</button>
+            </div>
+          {/if}
+        </header>
 
-    <aside class="right">
-      <Palette />
-      <div class="divider"></div>
-      <Inspector node={selectedNode} onChange={updateSelectedData} onDelete={deleteSelected} />
-    </aside>
+        <section class="grid">
+          <div class="grp">
+            <div class="grp-title">Canales horizontales</div>
+            <div class="row">
+              {#each HORIZONTAL_CHANNELS as ch (ch)}
+                {@const cfg = activeScenario.channels[ch]}
+                <div class="ch-card">
+                  <div class="ch-hd">
+                    <span class="ch-key">{ch}</span>
+                    <span class="ch-name">{CHANNEL_LABELS[ch]}</span>
+                  </div>
+
+                  <label class="field">
+                    <span class="lbl">Ganancia VOR <em>{cfg.gain.toFixed(2)}</em></span>
+                    <input
+                      type="range" min="0" max="1.5" step="0.05"
+                      value={cfg.gain}
+                      disabled={!editable}
+                      oninput={(e) => updateChannel(ch, { gain: +(e.currentTarget as HTMLInputElement).value })}
+                    />
+                  </label>
+
+                  <label class="field">
+                    <span class="lbl">Velocidad pico <em>{cfg.peakVel} °/s</em></span>
+                    <input
+                      type="range" min="80" max="300" step="5"
+                      value={cfg.peakVel}
+                      disabled={!editable}
+                      oninput={(e) => updateChannel(ch, { peakVel: +(e.currentTarget as HTMLInputElement).value })}
+                    />
+                  </label>
+
+                  <label class="field">
+                    <span class="lbl">Sacada correctiva</span>
+                    <select
+                      value={cfg.saccade}
+                      disabled={!editable}
+                      onchange={(e) => updateChannel(ch, { saccade: (e.currentTarget as HTMLSelectElement).value as ChannelConfig['saccade'] })}
+                    >
+                      <option value="none">Ninguna</option>
+                      <option value="covert">Cubierta</option>
+                      <option value="overt">Manifiesta</option>
+                    </select>
+                  </label>
+
+                  <div class="art">
+                    <div class="art-hd">
+                      <span class="lbl">Artefactos</span>
+                      <button disabled={!editable} onclick={() => addArtifact(ch)}>+ Añadir</button>
+                    </div>
+                    {#if cfg.artifacts.length === 0}
+                      <p class="muted">Sin artefactos (hereda del set de ojos activo).</p>
+                    {/if}
+                    {#each cfg.artifacts as a, i (i)}
+                      <div class="art-row">
+                        <select
+                          value={a.artifact}
+                          disabled={!editable}
+                          onchange={(e) => updateArtifact(ch, i, { artifact: (e.currentTarget as HTMLSelectElement).value as ArtifactKind })}
+                        >
+                          {#each ARTIFACT_OPTIONS as opt}
+                            <option value={opt.value}>{opt.label}</option>
+                          {/each}
+                        </select>
+                        <input
+                          type="number" min="0" max="1" step="0.05"
+                          value={a.probability}
+                          disabled={!editable}
+                          oninput={(e) => updateArtifact(ch, i, { probability: +(e.currentTarget as HTMLInputElement).value })}
+                        />
+                        <button class="del" disabled={!editable} onclick={() => removeArtifact(ch, i)}>×</button>
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+
+          <div class="grp">
+            <div class="grp-title">Canales verticales <span class="soon">próximamente</span></div>
+            <div class="row">
+              {#each VERTICAL_CHANNELS as ch (ch)}
+                <div class="ch-card disabled">
+                  <div class="ch-hd">
+                    <span class="ch-key">{ch}</span>
+                    <span class="ch-name">{CHANNEL_LABELS[ch]}</span>
+                  </div>
+                  <p class="muted">Disponible cuando la cámara detecte movimientos verticales.</p>
+                </div>
+              {/each}
+            </div>
+          </div>
+        </section>
+      {/if}
+    </main>
   </div>
 </div>
 
@@ -198,23 +219,19 @@
   .docente {
     flex: 1;
     display: grid;
-    grid-template-columns: 220px 1fr 280px;
+    grid-template-columns: 240px 1fr;
     min-height: 0;
   }
-  aside {
+  aside.left {
     background: var(--surface);
     border-right: 1px solid var(--border);
     overflow-y: auto;
+    padding: 12px;
+    display: flex; flex-direction: column; gap: 8px;
   }
-  aside.right { border-right: none; border-left: 1px solid var(--border); display: flex; flex-direction: column; }
-  .left { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
   .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); font-weight: 600; }
   .left ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-  .left li {
-    display: flex; align-items: center; gap: 4px;
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-  }
+  .left li { display: flex; align-items: center; gap: 4px; border-radius: var(--radius-sm); overflow: hidden; }
   .left li.active { background: var(--primary-soft); }
   .left li .name {
     flex: 1; text-align: left; padding: 6px 8px;
@@ -222,42 +239,84 @@
     font-size: 12px;
   }
   .left li.active .name { color: var(--primary); font-weight: 600; }
-  .left li .del { padding: 4px 8px; background: transparent; border: none; color: var(--text-muted); font-size: 14px; }
-  .left li .del:hover { color: var(--danger); background: transparent; }
-  .canvas { position: relative; min-width: 0; background: var(--bg); }
-  .readonly-banner {
-    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
-    z-index: 10;
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    border-radius: 999px;
-    padding: 4px 6px 4px 14px;
-    display: flex; align-items: center; gap: 10px;
-    font-size: 12px;
-    box-shadow: var(--shadow);
+  .left li .del, .left li .dup {
+    padding: 4px 8px; background: transparent; border: none;
+    color: var(--text-muted); font-size: 14px;
   }
-  .readonly-banner button { font-size: 11px; padding: 4px 10px; border-radius: 999px; }
+  .left li .del:hover { color: var(--danger); }
+  .left li .dup:hover { color: var(--primary); }
   .left .badge { font-size: 10px; margin-right: 4px; }
-  .left .dup { padding: 4px 8px; background: transparent; border: none; color: var(--text-muted); font-size: 14px; }
-  .left .dup:hover { color: var(--primary); background: transparent; }
   .left .empty-li { padding: 6px 8px; font-size: 11px; color: var(--text-muted); font-style: italic; text-align: center; }
   .ext-link {
     display: block; padding: 8px 10px;
     background: var(--accent-soft); color: var(--accent);
     border-radius: var(--radius-sm); text-decoration: none;
     font-size: 12px; font-weight: 600;
-    border: 1px solid var(--accent);
-    text-align: center;
+    border: 1px solid var(--accent); text-align: center;
     transition: background .15s;
   }
   .ext-link:hover { background: var(--accent); color: white; }
-  .empty { padding: 40px; text-align: center; color: var(--text-muted); }
-  .divider { border-top: 1px solid var(--border); margin: 4px 0; }
 
-  :global(.svelte-flow) { background: var(--bg); }
-  :global(.svelte-flow__node) { font-family: inherit; }
-  :global(.svelte-flow__handle) { background: var(--primary); width: 9px; height: 9px; border: 2px solid white; }
-  :global(.svelte-flow__edge-path) { stroke: var(--primary); stroke-width: 2; }
-  :global(.svelte-flow__minimap) { background: var(--surface); }
-  :global(.svelte-flow__controls button) { background: var(--surface); border-color: var(--border); color: var(--text); }
+  .canvas { overflow: auto; padding: 16px 24px 32px; background: var(--bg); }
+  .empty { padding: 60px 20px; text-align: center; color: var(--text-muted); }
+
+  .hd { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+  .hd h2 { margin: 0; font-size: 18px; }
+  .hd .desc { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); max-width: 600px; }
+  .readonly {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: 999px; padding: 4px 6px 4px 14px;
+    font-size: 12px; box-shadow: var(--shadow);
+  }
+  .readonly button { font-size: 11px; padding: 4px 10px; border-radius: 999px; }
+
+  .grid { display: flex; flex-direction: column; gap: 16px; }
+  .grp { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+  .grp-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text-muted); font-weight: 600;
+    margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+  }
+  .grp-title .soon {
+    background: var(--surface-2); color: var(--text-muted);
+    font-size: 9px; padding: 2px 6px; border-radius: 999px;
+    text-transform: none; letter-spacing: 0; font-weight: 500;
+  }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+
+  .ch-card {
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 12px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .ch-card.disabled { opacity: .5; pointer-events: none; }
+  .ch-hd { display: flex; align-items: baseline; gap: 8px; }
+  .ch-key { font-family: ui-monospace, monospace; font-weight: 700; font-size: 14px; color: var(--primary); }
+  .ch-name { font-size: 12px; color: var(--text-muted); }
+
+  .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+  .field .lbl { color: var(--text-muted); font-size: 11px; display: flex; justify-content: space-between; }
+  .field .lbl em { color: var(--text); font-style: normal; font-family: ui-monospace, monospace; font-weight: 600; }
+  .field input[type="range"] { width: 100%; }
+  .field select {
+    padding: 4px 6px; border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); background: var(--surface);
+    color: var(--text); font-size: 12px;
+  }
+
+  .art { border-top: 1px dashed var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .art-hd { display: flex; justify-content: space-between; align-items: center; }
+  .art-hd button { font-size: 11px; padding: 3px 8px; }
+  .art-row { display: grid; grid-template-columns: 1fr 70px auto; gap: 6px; align-items: center; }
+  .art-row select, .art-row input {
+    padding: 3px 6px; border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); background: var(--surface);
+    color: var(--text); font-size: 11px;
+  }
+  .art-row .del { background: transparent; border: none; color: var(--text-muted); font-size: 16px; padding: 0 4px; }
+  .art-row .del:hover { color: var(--danger); }
+  .muted { color: var(--text-muted); font-size: 11px; font-style: italic; margin: 0; }
+
+  button:disabled { opacity: .4; cursor: not-allowed; }
 </style>
