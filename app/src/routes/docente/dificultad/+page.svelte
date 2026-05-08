@@ -93,23 +93,23 @@
 
       <section class="grid">
         <div class="grp">
-          <h3>Pose neutra (zona verde)</h3>
-          <p class="hint">Tolerancia angular permitida antes del impulso. Más amplio = más fácil para principiantes.</p>
+          <h3>Amplitud máxima del impulso (zona verde)</h3>
+          <p class="hint">Recorrido angular máximo permitido durante el hit. Si la cabeza se mueve más que esto, el impulso falla. Más amplio = más fácil.</p>
           <label>
-            <span>Yaw — giro lateral (°)</span>
-            <input type="number" min="1" max="30" step="1"
+            <span>Horizontal — yaw (°)</span>
+            <input type="number" min="1" max="60" step="1"
               value={active.yawTol} disabled={!editable}
               oninput={(e) => patch({ yawTol: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
           <label>
-            <span>Pitch — cabeceo (°)</span>
-            <input type="number" min="1" max="30" step="1"
+            <span>Vertical — pitch (°)</span>
+            <input type="number" min="1" max="60" step="1"
               value={active.pitchTol} disabled={!editable}
               oninput={(e) => patch({ pitchTol: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
           <label>
-            <span>Roll — inclinación (°)</span>
-            <input type="number" min="1" max="30" step="1"
+            <span>Inclinación — roll (°)</span>
+            <input type="number" min="1" max="60" step="1"
               value={active.rollTol} disabled={!editable}
               oninput={(e) => patch({ rollTol: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
@@ -129,23 +129,6 @@
             <input type="number" min="100" max="500" step="5"
               value={active.peakMax} disabled={!editable}
               oninput={(e) => patch({ peakMax: +(e.currentTarget as HTMLInputElement).value })} />
-          </label>
-        </div>
-
-        <div class="grp">
-          <h3>Desplazamiento angular (°)</h3>
-          <p class="hint">Recorrido total de la cabeza durante el impulso (∫|velocidad|dt).</p>
-          <label>
-            <span>Mínimo</span>
-            <input type="number" min="1" max="60" step="1"
-              value={active.ampMin} disabled={!editable}
-              oninput={(e) => patch({ ampMin: +(e.currentTarget as HTMLInputElement).value })} />
-          </label>
-          <label>
-            <span>Máximo</span>
-            <input type="number" min="5" max="80" step="1"
-              value={active.ampMax} disabled={!editable}
-              oninput={(e) => patch({ ampMax: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
         </div>
 

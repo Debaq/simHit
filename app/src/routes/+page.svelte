@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { goto } from '$app/navigation';
   import TopBar from '$lib/components/TopBar.svelte';
   import EyeView from '$lib/components/EyeView.svelte';
   import TraceChart from '$lib/components/TraceChart.svelte';
@@ -8,10 +9,15 @@
   import ImpulseModal from '$lib/components/ImpulseModal.svelte';
   import { sim } from '$lib/simulator.svelte';
   import { scenarios } from '$lib/scenario.svelte';
+  import { bundles } from '$lib/bundle.svelte';
   import type { ImpulseSnapshot, Side } from '$lib/report.svelte';
 
-  onMount(() => {
-    scenarios.load();
+  onMount(async () => {
+    await scenarios.load();
+    if (bundles.active && bundles.active.kind !== 'clinico') {
+      goto('/practica');
+      return;
+    }
     sim.connect();
   });
   onDestroy(() => sim.disconnect());

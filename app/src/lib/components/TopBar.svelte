@@ -181,6 +181,7 @@
   }
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <header
   class="topbar"
   data-tauri-drag-region
@@ -203,7 +204,11 @@
   </div>
 
   <nav class="nav" data-tauri-drag-region>
-    <a href="/" class:active={path === '/'}>Pruebas</a>
+    {#if bundles.active && bundles.active.kind !== 'clinico'}
+      <a href="/practica" class:active={path === '/practica'}>Práctica</a>
+    {:else}
+      <a href="/" class:active={path === '/'}>Pruebas</a>
+    {/if}
     <a href="/informe" class:active={path?.startsWith('/informe')}>Informes</a>
     <a href="/docente" class:active={path === '/docente'}>Modo docente</a>
   </nav>

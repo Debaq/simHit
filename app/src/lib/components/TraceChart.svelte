@@ -4,7 +4,8 @@
   import 'uplot/dist/uPlot.min.css';
   import { sim } from '$lib/simulator.svelte';
 
-  let { title = 'Tiempo real' }: { title?: string } = $props();
+  let { title = 'Tiempo real', hideEye = false }:
+    { title?: string; hideEye?: boolean } = $props();
   let host: HTMLDivElement;
   let container: HTMLDivElement;
   let plot: uPlot | undefined;
@@ -48,27 +49,26 @@
           labelSize: 26,
         },
       ],
-      series: [
-        {},
-        { label: 'cabeza', stroke: head, width: 1.5 },
-        { label: 'ojo', stroke: eye, width: 1.5 },
-      ],
+      series: hideEye
+        ? [{}, { label: 'cabeza', stroke: head, width: 1.5 }]
+        : [
+            {},
+            { label: 'cabeza', stroke: head, width: 1.5 },
+            { label: 'ojo', stroke: eye, width: 1.5 },
+          ],
       cursor: { drag: { x: false, y: false }, points: { show: false } },
       legend: { show: false },
     };
 
-    plot = new uPlot(
-      opts,
-      [sim.tBuf, sim.headBuf, sim.eyeBuf] as unknown as uPlot.AlignedData,
-      container
-    );
+    const buildData = () => (hideEye
+      ? [sim.tBuf, sim.headBuf]
+      : [sim.tBuf, sim.headBuf, sim.eyeBuf]) as unknown as uPlot.AlignedData;
+
+    plot = new uPlot(opts, buildData(), container);
 
     const tick = () => {
       if (plot && sim.connected) {
-        plot.setData(
-          [sim.tBuf, sim.headBuf, sim.eyeBuf] as unknown as uPlot.AlignedData,
-          true
-        );
+        plot.setData(buildData(), true);
       }
       raf = requestAnimationFrame(tick);
     };
@@ -97,7 +97,9 @@
     {title}
     <span class="legend">
       <span><i style:background="#111827"></i><b>Cabeza</b> (gyro)</span>
-      <span><i style:background="#ca8a04"></i><b>Ojo</b> (VOR)</span>
+      {#if !hideEye}
+        <span><i style:background="#ca8a04"></i><b>Ojo</b> (VOR)</span>
+      {/if}
     </span>
   </div>
   <div bind:this={host} class="plot-host">

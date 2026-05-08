@@ -45,7 +45,7 @@ function integrateAmplitude(t: Float64Array, head: Float64Array): number {
 
 // Heurística simple de aceptación de impulso. Rangos configurables vía
 // store `acceptance` (presets principiante / estándar / avanzado / custom).
-export type CheckId = 'pose' | 'peak' | 'gain' | 'dur' | 'amp';
+export type CheckId = 'peak' | 'gain' | 'dur' | 'amp';
 export interface Check {
   id: CheckId;
   label: string;
@@ -66,34 +66,24 @@ export interface Verdict {
   checks: Check[];
 }
 
-function evaluateImpulse(
-  imp: Impulse, peakHead: number, gain: number,
-  pose0: { yaw: number; pitch: number; roll: number },
-): Verdict {
+function evaluateImpulse(imp: Impulse, peakHead: number, gain: number): Verdict {
   const cfg = acceptance.active;
   const durMs = imp.t.length ? imp.t[imp.t.length - 1] - imp.t[0] : 0;
   const amp = integrateAmplitude(imp.t, imp.head);
-  const poseErr = Math.max(
-    Math.abs(pose0.yaw)   / cfg.yawTol,
-    Math.abs(pose0.pitch) / cfg.pitchTol,
-    Math.abs(pose0.roll)  / cfg.rollTol,
-  );
+  // La amplitud máxima permitida del impulso es la zona verde (yawTol para
+  // canales horizontales LL/RL; pitchTol para verticales).
+  const ampMax = (imp.side === 'LL' || imp.side === 'RL') ? cfg.yawTol : cfg.pitchTol;
   const checks: Check[] = [
-    { id: 'pose', label: 'pose',     value: poseErr,  min: 0, max: 1, unit: '×tol',
-      ok: poseErr <= 1 },
+    { id: 'amp',  label: 'despl.',   value: amp,      min: 0,             max: ampMax,        unit: '°',
+      ok: amp <= ampMax },
     { id: 'peak', label: 'pico',     value: peakHead, min: cfg.peakMin,   max: cfg.peakMax,   unit: '°/s',
       ok: peakHead >= cfg.peakMin && peakHead <= cfg.peakMax },
     { id: 'gain', label: 'ganancia', value: gain,     min: cfg.gainMin,   max: cfg.gainMax,   unit: '',
       ok: gain >= cfg.gainMin && gain <= cfg.gainMax },
     { id: 'dur',  label: 'duración', value: durMs,    min: cfg.durMinMs,  max: cfg.durMaxMs,  unit: 'ms',
       ok: durMs >= cfg.durMinMs && durMs <= cfg.durMaxMs },
-    { id: 'amp',  label: 'despl.',   value: amp,      min: cfg.ampMin,    max: cfg.ampMax,    unit: '°',
-      ok: amp >= cfg.ampMin && amp <= cfg.ampMax },
   ];
   const fmt = (c: Check) => {
-    if (c.id === 'pose') {
-      return `pose inicial fuera de tolerancia (yaw ${pose0.yaw.toFixed(1)}° / pitch ${pose0.pitch.toFixed(1)}° / roll ${pose0.roll.toFixed(1)}°)`;
-    }
     const dec = c.id === 'gain' ? 2 : c.id === 'amp' ? 1 : 0;
     return `${c.label} ${c.value.toFixed(dec)} fuera de ${c.min}–${c.max}${c.unit ? ' ' + c.unit : ''}`;
   };
@@ -329,17 +319,14 @@ class Simulator {
   }
 
   private tick() {
-    // En idle: si hay sensor, igual reflejamos pose en vivo (para calibrar ejes
-    // visualmente) sin acumular datos en el buffer ni detectar impulsos.
+    // En idle con sensor: alimentar buffer con velocidad real (sin detectar
+    // impulsos). Eso mantiene el gráfico vivo aunque no haya práctica/escenario.
+    if (this.mode === 'idle' && !this.impCfg && serial.connected) {
+      this.tickWithSensor();
+      return;
+    }
     if (this.mode === 'idle' && !this.impCfg) {
-      if (serial.connected) {
-        this.headYaw = serial.poseYaw;
-        this.headPitch = serial.posePitch;
-        this.headRoll = serial.poseRoll;
-        // VOR en idle: ojo compensa pose de cabeza (gain=1).
-        this.gaze = yawToGaze(this.headYaw);
-        this.gazeY = pitchToGaze(this.headPitch);
-      }
+      // Sin sensor y sin escenario: dejar el gráfico quieto, sin generar ruido.
       return;
     }
 
@@ -621,9 +608,7 @@ class Simulator {
     else this.impulsesRL = [...this.impulsesRL, imp].slice(-15);
     this.capturing = null;
     this.lastImpulse = imp;
-    this.lastVerdict = evaluateImpulse(imp, peakHead, gain, {
-      yaw: c.poseYaw0, pitch: c.posePitch0, roll: c.poseRoll0,
-    });
+    this.lastVerdict = evaluateImpulse(imp, peakHead, gain);
   }
 
   private scheduleNextRandom() {

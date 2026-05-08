@@ -6,7 +6,8 @@
 // y evaluateImpulse).
 
 export interface AcceptanceCfg {
-  /** Tolerancia angular en pose neutra previa al impulso (°). */
+  /** Amplitud angular máxima permitida del impulso (°). Define la zona verde
+   *  del HeadLiveView: la cabeza no debe excederla durante el hit. */
   yawTol: number;
   pitchTol: number;
   rollTol: number;
@@ -19,9 +20,6 @@ export interface AcceptanceCfg {
   /** Duración del impulso (ms). */
   durMinMs: number;
   durMaxMs: number;
-  /** Desplazamiento angular total durante el impulso (°). */
-  ampMin: number;
-  ampMax: number;
 }
 
 export interface AcceptancePreset extends AcceptanceCfg {
@@ -31,35 +29,34 @@ export interface AcceptancePreset extends AcceptanceCfg {
 }
 
 const BUILTIN: AcceptancePreset[] = [
+  // Tolerancia de pose neutra (zona verde) según literatura vHIT:
+  // 30° principiante, 20° estándar, 10° experto.
   {
     id: 'principiante',
     name: 'Principiante',
     builtin: true,
-    yawTol: 12, pitchTol: 12, rollTol: 12,
+    yawTol: 30, pitchTol: 30, rollTol: 30,
     peakMin: 70, peakMax: 320,
     gainMin: 0.30, gainMax: 1.60,
     durMinMs: 60, durMaxMs: 320,
-    ampMin: 5, ampMax: 35,
   },
   {
     id: 'estandar',
     name: 'Estándar',
     builtin: true,
-    yawTol: 6, pitchTol: 6, rollTol: 6,
+    yawTol: 20, pitchTol: 20, rollTol: 20,
     peakMin: 100, peakMax: 280,
     gainMin: 0.40, gainMax: 1.40,
     durMinMs: 80, durMaxMs: 260,
-    ampMin: 8, ampMax: 25,
   },
   {
     id: 'avanzado',
     name: 'Avanzado',
     builtin: true,
-    yawTol: 3, pitchTol: 3, rollTol: 3,
+    yawTol: 10, pitchTol: 10, rollTol: 10,
     peakMin: 130, peakMax: 250,
     gainMin: 0.50, gainMax: 1.30,
     durMinMs: 100, durMaxMs: 230,
-    ampMin: 10, ampMax: 20,
   },
 ];
 
@@ -112,7 +109,6 @@ class AcceptanceStore {
       peakMin: seed.peakMin, peakMax: seed.peakMax,
       gainMin: seed.gainMin, gainMax: seed.gainMax,
       durMinMs: seed.durMinMs, durMaxMs: seed.durMaxMs,
-      ampMin: seed.ampMin, ampMax: seed.ampMax,
     };
     this.custom = [...this.custom, preset];
     this.persist();
