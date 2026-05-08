@@ -1,0 +1,48 @@
+name: Cleanup artifacts (todos los repos)
+
+# Limpia artifacts no expirados en todos los repos del usuario una vez por
+# semana para no agotar la cuota de 500 MB del plan free.
+#
+# Requiere un secret `CLEANUP_PAT` con scope `repo` (Personal Access Token
+# clásico). Generarlo en https://github.com/settings/tokens y guardarlo en
+# Settings → Secrets and variables → Actions → New repository secret.
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'   # Lunes 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      keep_days:
+        description: 'Conservar artifacts más nuevos que N días'
+        required: false
+        default: '0'
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Borrar artifacts
+        env:
+          GH_TOKEN: ${{ secrets.CLEANUP_PAT }}
+          KEEP_DAYS: ${{ github.event.inputs.keep_days || '0' }}
+        run: |
+          set -e
+          if [ "$KEEP_DAYS" -gt 0 ]; then
+            cutoff=$(date -d "$KEEP_DAYS days ago" -u +%Y-%m-%dT%H:%M:%SZ)
+            echo "Conservar artifacts más nuevos que $cutoff"
+          else
+            cutoff="9999-12-31T00:00:00Z"
+            echo "Borrando TODOS los artifacts no expirados"
+          fi
+
+          deleted=0
+          freed=0
+          gh api /user/repos --paginate --jq '.[].full_name' | while read repo; do
+            gh api "/repos/$repo/actions/artifacts" --paginate \
+              --jq ".artifacts[] | select(.expired==false and .created_at < \"$cutoff\") | [.id, .size_in_bytes] | @tsv" |
+            while IFS=$'\t' read id size; do
+              if gh api -X DELETE "/repos/$repo/actions/artifacts/$id" 2>/dev/null; then
+                echo "✓ $repo/$id ($((size/1048576)) MB)"
+              fi
+            done
+          done
