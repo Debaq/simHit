@@ -50,6 +50,53 @@
 
   let progress = $derived(practice.progress);
   let current = $derived(practice.current);
+  /** Canal objetivo del goal actual (solo definido en variant 'multi'). */
+  let currentTarget = $derived(current?.targetChannel ?? null);
+
+  // Detección de transición de plano entre goals (multi). Cuando el target
+  // cambia se dispara un banner temporal con la indicación de pose.
+  let prevTarget = $state<string | null>(null);
+  let transitionUntil = $state(0);
+  let transitionMsg = $state('');
+  function planeLabel(ch: string | null): string {
+    if (!ch) return '';
+    if (ch === 'LL' || ch === 'RL') return 'plano horizontal';
+    if (ch === 'LA' || ch === 'RP') return 'plano LARP (yaw ~−45°)';
+    return 'plano RALP (yaw ~+45°)';
+  }
+  function transitionHint(from: string | null, to: string | null): string {
+    if (!to) return '';
+    if (!from) return `Posiciona la cabeza en ${planeLabel(to)} para el canal ${to}.`;
+    const fromPlane = planeLabel(from);
+    const toPlane = planeLabel(to);
+    if (fromPlane === toPlane) return `Sigue en ${toPlane} — ahora canal ${to}.`;
+    return `Cambia de plano: ${fromPlane} → ${toPlane} (canal ${to}).`;
+  }
+  $effect(() => {
+    // Reaccionar solo a cambios reales del target. Si no hay práctica activa
+    // se ignora (no se quiere mostrar banner cuando se reinicia o detiene).
+    const t = currentTarget;
+    if (!practice.active) {
+      prevTarget = null;
+      transitionUntil = 0;
+      return;
+    }
+    if (t === prevTarget) return;
+    if (practice.variant === 'multi' && t) {
+      transitionMsg = transitionHint(prevTarget, t);
+      transitionUntil = Date.now() + 4500; // banner dura ~4.5s
+    }
+    prevTarget = t;
+  });
+  // Tick para que el banner se oculte solo cuando vence `transitionUntil`.
+  let nowMs = $state(Date.now());
+  $effect(() => {
+    const id = setInterval(() => (nowMs = Date.now()), 500);
+    return () => clearInterval(id);
+  });
+  let banner = $derived(
+    practice.variant === 'multi' && transitionUntil > nowMs && transitionMsg !== '',
+  );
   let remaining = $derived(practice.remainingByPreset);
   let recent = $derived(practice.attempts.slice().reverse());
   let selectedTs = $state<number | null>(null);
@@ -279,14 +326,30 @@
         <div class="head-card">
           <HeadLiveView
             impulseLayout="prominent"
-            targetChannel={bundle?.kind === 'practica-vert' ? 'vert-any' : undefined}
+            targetChannel={
+              bundle?.kind === 'practica-multi'
+                ? (currentTarget ?? undefined)
+                : bundle?.kind === 'practica-vert'
+                  ? 'vert-any'
+                  : undefined
+            }
           />
+          {#if banner}
+            <div class="plane-banner">
+              <span class="plane-icon">🧭</span>
+              <span class="plane-msg">{transitionMsg}</span>
+            </div>
+          {/if}
         </div>
         <aside class="side">
           <div class="panel">
             <div class="panel-title">
               <span>Sesión de práctica</span>
-              <span class="kind-tag {bundle.kind}">{bundle.kind === 'practica-horiz' ? 'Horizontal' : 'Vertical'}</span>
+              <span class="kind-tag {bundle.kind}">{
+                bundle.kind === 'practica-horiz' ? 'Horizontal'
+                  : bundle.kind === 'practica-vert' ? 'Vertical'
+                  : 'Multicanal'
+              }</span>
             </div>
 
             {#if !practice.active}
@@ -300,6 +363,12 @@
                     🧭 <b>Práctica vertical (planos LARP / RALP).</b>
                     Posiciona la cabeza girada ~45° a izquierda (LARP: LA / RP) o a derecha (RALP: RA / LP)
                     antes de cada impulso. El canal se identifica automáticamente según la pose y la dirección del impulso.
+                  </div>
+                {:else if bundle.kind === 'practica-multi'}
+                  <div class="vert-hint">
+                    🧭 <b>Práctica multicanal (6 canales).</b>
+                    Cada objetivo fija un canal específico. La vista superior muestra la pose esperada;
+                    se anuncia la transición entre planos (horizontal → LARP → RALP) al cambiar de canal.
                   </div>
                 {/if}
                 <ul class="goals-summary">
@@ -344,9 +413,16 @@
               {#if current}
                 <div class="now">
                   <span class="ro-lab">Objetivo actual</span>
-                  <b class="big-level">{levelName(current.acceptanceId)}</b>
-                  {#if bundle.kind === 'practica-vert'}
-                    <span class="now-hint">Plano vertical · sigue la marca diagonal en la vista superior (LARP o RALP)</span>
+                  {#if bundle.kind === 'practica-multi' && current.targetChannel}
+                    <b class="big-level">{current.targetChannel} · {CHANNEL_LABELS[current.targetChannel]}</b>
+                    <span class="now-hint">
+                      Nivel: <b>{levelName(current.acceptanceId)}</b> · {planeLabel(current.targetChannel)}
+                    </span>
+                  {:else}
+                    <b class="big-level">{levelName(current.acceptanceId)}</b>
+                    {#if bundle.kind === 'practica-vert'}
+                      <span class="now-hint">Plano vertical · sigue la marca diagonal en la vista superior (LARP o RALP)</span>
+                    {/if}
                   {/if}
                 </div>
               {/if}
@@ -674,6 +750,22 @@
   }
   .kind-tag.practica-horiz { background: #fde68a; color: #92400e; }
   .kind-tag.practica-vert { background: #c7d2fe; color: #3730a3; }
+  .kind-tag.practica-multi { background: #bbf7d0; color: #14532d; }
+
+  .plane-banner {
+    margin-top: 8px;
+    padding: 10px 14px;
+    background: #1e3a8a; color: white;
+    border-radius: var(--radius-sm);
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px; font-weight: 600;
+    animation: plane-banner-in 220ms ease-out;
+  }
+  .plane-banner .plane-icon { font-size: 18px; }
+  @keyframes plane-banner-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
 
   .start { display: flex; flex-direction: column; gap: 12px; }
   .start .muted { color: var(--text-muted); font-size: 13px; margin: 0; }
