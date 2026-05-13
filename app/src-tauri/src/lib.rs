@@ -1,4 +1,6 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+mod metrics;
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -16,7 +18,16 @@ pub fn run() {
         .plugin(tauri_plugin_serialplugin::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet, save_pdf])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            save_pdf,
+            metrics::capture::start_static_capture,
+            metrics::capture::append_samples,
+            metrics::capture::get_capture_progress,
+            metrics::capture::stop_capture,
+            metrics::sampling::analyze_sampling,
+            metrics::allan::analyze_allan_variance,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -23,6 +23,16 @@ function crc16Ccitt(s: string): number {
 }
 
 export type FirmwareVersion = 'legacy' | 'extended' | 'unknown';
+
+// Muestra cruda emitida en cada parseLine() exitoso. Sin mapeo de ejes:
+// los componentes son los del sensor físico tal como los provee el firmware.
+export type RawSample = {
+  ax: number; ay: number; az: number;     // orientación (°)
+  gx: number; gy: number; gz: number;     // velocidad angular (°/s)
+  aax: number; aay: number; aaz: number;  // aceleración angular (°/s²), 0 en legacy
+  lax: number; lay: number; laz: number;  // aceleración lineal (m/s²), 0 en legacy
+  tsMs: number;                            // timestamp del firmware (ms desde boot)
+};
 export type AccelFilterMode = 'SG' | 'IIR' | 'NONE';
 
 export type Axis = 'x' | 'y' | 'z';
@@ -109,6 +119,10 @@ class SerialStore {
   private linAccelQueue: Array<{ x: number; y: number; z: number }> = [];
   // Rate-limit de warnings por linea malformada (1/seg).
   private lastBadLineWarnMs = 0;
+  // Sumideros de captura raw: callbacks que reciben cada muestra completa
+  // tal cual la emite el firmware (sin mapeo de ejes). Usado por el módulo
+  // de métricas para persistir a CSV sin pasar por las colas del simulador.
+  private captureSinks: Array<(s: RawSample) => void> = [];
   // mapeo configurable de ejes
   axes = $state<AxesConfig>(loadAxes());
 
@@ -442,6 +456,14 @@ class SerialStore {
     this.gyroQueue.push({ x: gx, y: gy, z: gz });
     this.angAccelQueue.push({ x: aax, y: aay, z: aaz });
     this.linAccelQueue.push({ x: lax, y: lay, z: laz });
+    // Notificar a sumideros de captura. Wrapping en try para que una captura
+    // que falle no rompa el stream principal del simulador.
+    if (this.captureSinks.length > 0) {
+      const raw: RawSample = { ax, ay, az, gx, gy, gz, aax, aay, aaz, lax, lay, laz, tsMs: ts };
+      for (const sink of this.captureSinks) {
+        try { sink(raw); } catch (e) { console.warn('[serial] captureSink error', e); }
+      }
+    }
     // Cap defensivo: si nadie drena (sim parado), no crecer sin límite.
     // Las tres colas se mantienen alineadas: si truncamos una, truncamos
     // las tres por el mismo lado.
@@ -516,6 +538,17 @@ class SerialStore {
     const out = this.linAccelQueue.map((s) => ({ x: s.x, y: s.y, z: s.z }));
     this.linAccelQueue.length = 0;
     return out;
+  }
+
+  // Registra un sumidero de captura raw. Devuelve una función para desregistrar.
+  // Las muestras llegan en el orden en que el firmware las emitió, sin mapeo
+  // de ejes y sin filtrado del simulador.
+  addCaptureSink(sink: (s: RawSample) => void): () => void {
+    this.captureSinks.push(sink);
+    return () => {
+      const i = this.captureSinks.indexOf(sink);
+      if (i >= 0) this.captureSinks.splice(i, 1);
+    };
   }
 
   // Selecciona el modo de filtro de la derivada del gyro en el firmware.

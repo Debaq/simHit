@@ -228,6 +228,7 @@
       <a href="/" class:active={path === '/'}>Pruebas</a>
     {/if}
     <a href="/informes" class:active={path?.startsWith('/informe')}>Informes</a>
+    <a href="/metricas" class:active={path === '/metricas'}>Métricas</a>
     <a href="/docente" class:active={path === '/docente'}>Modo docente</a>
   </nav>
 
