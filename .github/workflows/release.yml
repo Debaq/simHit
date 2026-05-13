@@ -98,9 +98,9 @@ jobs:
 
             ## Para flashear / actualizar el firmware del dispositivo
 
-            1. Instalá esta app.
-            2. Conectá la gafa SimHIT por USB-C.
-            3. Andá a **Métricas → paso 1 (Firmware)**: la app chequea contra el último Release `fw-v*` y te ofrece flashearlo si hay actualización.
+            1. Instale esta app.
+            2. Conecte la gafa SimHIT por USB-C.
+            3. Vaya a **Métricas → paso 1 (Firmware)**: la app chequea contra el último Release `fw-v*` y le ofrece flashearlo si hay actualización.
           files: |
             simhit-${{ github.ref_name }}-linux-x86_64
             simhit-${{ github.ref_name }}-windows-x86_64-setup.exe

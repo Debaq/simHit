@@ -127,18 +127,18 @@ jobs:
           body: |
             > ⚠️ **Esto es FIRMWARE del dispositivo (microcontrolador ESP32-C3 dentro de la gafa SimHIT), NO es el software de escritorio.**
             >
-            > Para descargar la aplicación SimHIT (Linux/Windows) buscá los Releases con tag `v2026.*`.
+            > Para descargar la aplicación SimHIT (Linux/Windows) busque los Releases con tag `v2026.*`.
 
             ## Instalación recomendada — desde la app SimHIT
 
             La forma soportada de instalar este firmware es desde la propia aplicación SimHIT:
 
-            1. Abrí SimHIT y conectá la gafa por USB-C.
-            2. Andá a la pestaña **Métricas → paso 1 (Firmware)**.
-            3. La app detecta automáticamente la versión instalada y compara contra esta release.
-            4. Si hay actualización disponible, presioná **Flashear v${{ steps.ver.outputs.version }}**.
+            1. Abra SimHIT y conecte la gafa por USB-C.
+            2. Vaya a la pestaña **Métricas → paso 1 (Firmware)**.
+            3. La app detecta automáticamente la versión instalada y la compara contra este Release.
+            4. Si hay actualización disponible, presione **Flashear v${{ steps.ver.outputs.version }}**.
 
-            No necesitás `esptool.py`, terminal ni Arduino IDE.
+            No requiere `esptool.py`, terminal ni Arduino IDE.
 
             ## Detalles técnicos
 
@@ -148,7 +148,7 @@ jobs:
 
             ## Flasheo manual (avanzado / debugging)
 
-            Solo si no podés usar la app, o estás haciendo bring-up de hardware:
+            Solo si no puede usar la app, o está haciendo bring-up de hardware:
 
             ```bash
             esptool.py --chip esp32c3 --port /dev/ttyACM0 --baud 460800 \
