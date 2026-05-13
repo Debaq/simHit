@@ -29,6 +29,7 @@ pub fn run() {
             metrics::allan::analyze_allan_variance,
             metrics::flash::detect_esp_chip,
             metrics::flash::flash_firmware,
+            metrics::flash::list_serial_ports,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

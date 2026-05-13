@@ -19,6 +19,16 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Serialize, Clone)]
+pub struct UsbSerialPort {
+    pub port_name: String,
+    pub vid: u16,
+    pub pid: u16,
+    pub manufacturer: Option<String>,
+    pub product: Option<String>,
+    pub serial_number: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
 pub struct EspChipInfo {
     pub chip: String,
     pub crystal_freq_mhz: u32,
@@ -94,6 +104,31 @@ fn open_port(port_path: &str, baud: u32) -> Result<NativePort, FlashError> {
         .timeout(std::time::Duration::from_millis(3000))
         .open_native()
         .map_err(FlashError::from)
+}
+
+// Lista todos los puertos USB-Serial visibles. No filtra por VID/PID: el
+// usuario elige cuál es el ESP. Si elige uno equivocado, espflash devolverá
+// un error claro en lugar de fallar silencioso.
+#[tauri::command]
+pub fn list_serial_ports() -> Result<Vec<UsbSerialPort>, FlashError> {
+    let ports = serialport::available_ports()
+        .map_err(|e| FlashError::new("ListPortsFailed", e.to_string()))?;
+    let mut out = Vec::new();
+    for p in ports {
+        if let SerialPortType::UsbPort(info) = p.port_type {
+            // En Linux excluimos /dev/ttyS* (serial nativo, no USB).
+            if p.port_name.starts_with("/dev/ttyS") { continue; }
+            out.push(UsbSerialPort {
+                port_name: p.port_name,
+                vid: info.vid,
+                pid: info.pid,
+                manufacturer: info.manufacturer,
+                product: info.product,
+                serial_number: info.serial_number,
+            });
+        }
+    }
+    Ok(out)
 }
 
 #[tauri::command]

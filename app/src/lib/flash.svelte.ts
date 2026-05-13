@@ -16,6 +16,15 @@ import { firmware } from './firmware.svelte';
 
 export type FlashStage = 'idle' | 'downloading' | 'verifying' | 'connecting' | 'writing' | 'resetting' | 'done' | 'error';
 
+export type UsbSerialPort = {
+  port_name: string;
+  vid: number;
+  pid: number;
+  manufacturer: string | null;
+  product: string | null;
+  serial_number: string | null;
+};
+
 type ProgressEvent = {
   phase: string;
   current: number;
@@ -46,7 +55,16 @@ class FlashStore {
 
   private unlisten: UnlistenFn | null = null;
 
-  async start() {
+  // Lista puertos USB-Serial visibles para que el usuario elija manualmente.
+  // Útil cuando el dispositivo está virgen (no responde al probe HELLO).
+  async listPorts(): Promise<UsbSerialPort[]> {
+    return await invoke<UsbSerialPort[]>('list_serial_ports');
+  }
+
+  // Si se pasa `port`, lo usa explícitamente; si no, intenta serial.portPath.
+  // Permite flashear dispositivos sin firmware previo (el ROM bootloader del
+  // ESP entra al modo descarga vía DTR/RTS sin importar si hay handshake).
+  async start(port?: string) {
     if (this.stage !== 'idle' && this.stage !== 'done' && this.stage !== 'error') {
       throw new Error('Flasheo ya en curso');
     }
@@ -56,8 +74,9 @@ class FlashStore {
       this.fail('No hay manifest cargado. Refresque el chequeo de actualización primero.');
       return;
     }
-    if (!serial.portPath) {
-      this.fail('No hay puerto SimHIT seleccionado.');
+    const targetPort = port ?? serial.portPath;
+    if (!targetPort) {
+      this.fail('Seleccione un puerto USB-Serial.');
       return;
     }
     const artifact = firmware.manifest.latest.artifacts.find((a) => a.board === 'esp32-c3-supermini' && (a as { image_type?: string }).image_type === 'merged')
@@ -67,10 +86,11 @@ class FlashStore {
       return;
     }
 
-    const port = serial.portPath;
-    // El plugin serial mantiene el puerto abierto; espflash necesita acceso
-    // exclusivo. Liberamos antes de pasar el path al backend.
-    await serial.disconnect();
+    // Si el puerto elegido coincide con el SimHIT conectado, liberar el
+    // recurso para que espflash pueda tomarlo en exclusivo.
+    if (serial.connected && serial.portPath === targetPort) {
+      await serial.disconnect();
+    }
 
     try {
       this.stage = 'downloading';
@@ -94,7 +114,7 @@ class FlashStore {
       this.message = 'Conectando al ESP…';
       const flashAddr = (artifact as { flash_address?: number }).flash_address ?? 0;
       await invoke('flash_firmware', {
-        port,
+        port: targetPort,
         bytes: Array.from(bytes),
         flashAddress: flashAddr,
       });

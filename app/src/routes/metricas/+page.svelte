@@ -20,8 +20,34 @@
   // (espflash + .bin embebido o descargado) es el último componente del
   // módulo de métricas; por ahora solo detectamos versión y advertimos.
 
-  // Consultar el manifest al montar la vista. Idempotente.
-  onMount(() => { void firmware.check(false); });
+  // Consultar el manifest + listar puertos USB al montar la vista.
+  onMount(() => {
+    void firmware.check(false);
+    void refreshUsbPorts();
+  });
+
+  // Lista de puertos USB-Serial para instalación desde cero (sin firmware).
+  let usbPorts = $state<Array<{ port_name: string; vid: number; pid: number; manufacturer: string | null; product: string | null }>>([]);
+  let selectedManualPort = $state<string>('');
+  let listingPorts = $state(false);
+
+  async function refreshUsbPorts() {
+    listingPorts = true;
+    try {
+      usbPorts = await flash.listPorts();
+      if (!selectedManualPort && usbPorts.length > 0) {
+        selectedManualPort = usbPorts[0].port_name;
+      }
+    } catch (e) {
+      console.warn('list_serial_ports falló', e);
+    } finally {
+      listingPorts = false;
+    }
+  }
+
+  function fmtVidPid(vid: number, pid: number): string {
+    return `${vid.toString(16).padStart(4, '0')}:${pid.toString(16).padStart(4, '0')}`;
+  }
 
   // 2) Identificación del sensor. Datos reales provenientes del banner que
   // el firmware emite en el boot ("Gyro WHO_AM_I @0xXX = 0xYY (Nombre)"),
@@ -471,9 +497,48 @@
           </div>
         </div>
 
-        <div class="note">
-          El flasheo automático (espflash + binario embebido) está planificado. Por ahora la actualización es manual:
-          descargá el <code>.bin</code> desde la sección Releases y usá <code>esptool.py</code> o <code>arduino-cli</code> hasta que se integre el módulo de flash.
+        <div class="card">
+          <div class="card-h">Instalación desde cero (dispositivo sin firmware)</div>
+          <p class="note inline" style="margin-top:0;margin-bottom:12px">
+            Si la gafa está virgen o el firmware está corrupto, no emite el banner SimHit y no aparece en la tarjeta de arriba.
+            Use esta sección: elija el puerto USB-Serial al que está conectada y flashee directamente — el ROM bootloader del
+            ESP32 entra al modo descarga vía DTR/RTS sin importar el estado del firmware.
+          </p>
+
+          <div class="form" style="margin-bottom:10px">
+            <label>
+              <span>Puerto USB-Serial</span>
+              <select bind:value={selectedManualPort} disabled={listingPorts || usbPorts.length === 0}>
+                {#if usbPorts.length === 0}
+                  <option value="">— No se detectan puertos USB —</option>
+                {:else}
+                  {#each usbPorts as p}
+                    <option value={p.port_name}>
+                      {p.port_name} — {p.product ?? p.manufacturer ?? 'sin descripción'} [{fmtVidPid(p.vid, p.pid)}]
+                    </option>
+                  {/each}
+                {/if}
+              </select>
+            </label>
+          </div>
+
+          <div class="actions-row">
+            <button onclick={refreshUsbPorts} disabled={listingPorts}>
+              {listingPorts ? 'Buscando…' : '↻ Refrescar puertos'}
+            </button>
+            <button
+              class="primary"
+              onclick={() => flash.start(selectedManualPort)}
+              disabled={!selectedManualPort || !firmware.manifest || (flash.stage !== 'idle' && flash.stage !== 'done' && flash.stage !== 'error')}
+            >
+              🆕 Flashear en {selectedManualPort || '(seleccione puerto)'}
+            </button>
+          </div>
+
+          <p class="note inline" style="margin-top:10px">
+            ⚠ Asegúrese de elegir el puerto correcto: si flashea por error el puerto equivocado, espflash devolverá un error
+            inmediato ("Failed to connect"). No hay riesgo de bricking del puerto seleccionado.
+          </p>
         </div>
 
         {#if serial.firmwareVersionString && firmware.manifest && firmware.status === 'update-available'}
