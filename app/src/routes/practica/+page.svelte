@@ -5,6 +5,7 @@
   import TraceChart from '$lib/components/TraceChart.svelte';
   import TraceReview from '$lib/components/TraceReview.svelte';
   import { sim } from '$lib/simulator.svelte';
+  import { serial } from '$lib/serial.svelte';
   import { scenarios } from '$lib/scenario.svelte';
   import { bundles } from '$lib/bundle.svelte';
   import { acceptance } from '$lib/acceptance.svelte';
@@ -101,6 +102,7 @@
   let practitionerInput = $state('');
   function startSession() {
     if (!bundle || bundle.kind === 'clinico') return;
+    if (!serial.connected) return;
     practitionerInput = practice.practitioner;
     nameModalOpen = true;
   }
@@ -271,7 +273,18 @@
                     <li><b>{g.count}</b> · {levelName(g.acceptanceId)}</li>
                   {/each}
                 </ul>
-                <button class="primary big" disabled={goalCount === 0} onclick={startSession}>
+                {#if !serial.connected}
+                  <div class="hw-warn">
+                    🔌 <b>SimHIT hardware no detectado.</b>
+                    Conecta el equipo y calibra el IMU para practicar.
+                    El modo práctica solo trabaja con impulsos reales del sensor.
+                  </div>
+                {/if}
+                <button
+                  class="primary big"
+                  disabled={goalCount === 0 || !serial.connected}
+                  onclick={startSession}
+                >
                   ▶ Iniciar práctica
                 </button>
               </div>
@@ -627,6 +640,13 @@
 
   .start { display: flex; flex-direction: column; gap: 12px; }
   .start .muted { color: var(--text-muted); font-size: 13px; margin: 0; }
+  .hw-warn {
+    padding: 10px 14px;
+    background: #fef3c7; border: 1px solid #f59e0b;
+    border-radius: var(--radius-sm);
+    color: #92400e; font-size: 13px; line-height: 1.4;
+  }
+  .hw-warn b { color: #78350f; }
 
   .progress { margin-bottom: 12px; }
   .prog-row { display: flex; justify-content: space-between; font-size: 13px; }
