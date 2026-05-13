@@ -209,7 +209,7 @@
     {:else}
       <a href="/" class:active={path === '/'}>Pruebas</a>
     {/if}
-    <a href="/informe" class:active={path?.startsWith('/informe')}>Informes</a>
+    <a href="/informes" class:active={path?.startsWith('/informe')}>Informes</a>
     <a href="/docente" class:active={path === '/docente'}>Modo docente</a>
   </nav>
 

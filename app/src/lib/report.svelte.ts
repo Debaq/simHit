@@ -74,7 +74,10 @@ export type Report = {
 
 import { storage } from './storage';
 
-const REPORTS_DIR = 'reports';
+// Layout actual: informes/simulacion/<id>.json (PDF opcional como <id>.pdf).
+// Layout legacy: reports/<id>.json — se migra automáticamente al cargar.
+const REPORTS_DIR = 'informes/simulacion';
+const LEGACY_DIR = 'reports';
 const LEGACY_KEY = 'simhit:reports';
 
 export function emptyFindings(): Findings {
@@ -94,9 +97,15 @@ class ReportStore {
   loaded = $state(false);
 
   async load() {
-    // migración legacy
-    const filenames = await storage.list(REPORTS_DIR);
-    if (filenames.length === 0) {
+    // Migración: directorio legacy reports/ -> informes/simulacion/
+    const filenamesNew = await storage.list(REPORTS_DIR);
+    if (filenamesNew.length === 0) {
+      const legacyFiles = await storage.list(LEGACY_DIR);
+      for (const fn of legacyFiles.filter((n) => n.endsWith('.json'))) {
+        const r = await storage.readJson<Report>(`${LEGACY_DIR}/${fn}`);
+        if (r) await storage.writeJson(`${REPORTS_DIR}/${fn}`, r);
+      }
+      // Migración legacy localStorage
       const legacy = localStorage.getItem(LEGACY_KEY);
       if (legacy) {
         try {
@@ -115,6 +124,19 @@ class ReportStore {
     this.loaded = true;
   }
 
+  /** Guarda el PDF generado de un informe junto al JSON. */
+  async writePdf(id: string, bytes: Uint8Array) {
+    await storage.writeBinary(`${REPORTS_DIR}/${id}.pdf`, bytes);
+  }
+
+  async readPdfBlobUrl(id: string): Promise<string | null> {
+    return await storage.readAsBlobUrl(`${REPORTS_DIR}/${id}.pdf`, 'application/pdf');
+  }
+
+  async readPdfBytes(id: string): Promise<Uint8Array | null> {
+    return await storage.readBinary(`${REPORTS_DIR}/${id}.pdf`);
+  }
+
   upsert(r: Report) {
     const idx = this.list.findIndex((x) => x.id === r.id);
     if (idx >= 0) {
@@ -129,6 +151,7 @@ class ReportStore {
   remove(id: string) {
     this.list = this.list.filter((x) => x.id !== id);
     void storage.remove(`${REPORTS_DIR}/${id}.json`);
+    void storage.remove(`${REPORTS_DIR}/${id}.pdf`);
   }
 
   get(id: string): Report | null {

@@ -10,7 +10,7 @@
   import { bundles } from '$lib/bundle.svelte';
   import { acceptance } from '$lib/acceptance.svelte';
   import { practice } from '$lib/practice.svelte';
-  import { storage } from '$lib/storage';
+  import { practiceReports, humanStamp as prHumanStamp, slugName as prSlugName, type PracticeReport } from '$lib/practiceReport.svelte';
 
   onMount(async () => {
     await scenarios.load();
@@ -108,6 +108,7 @@
   }
   function confirmStart() {
     if (!bundle || bundle.kind === 'clinico') return;
+    currentReportId = null;
     practice.start(bundle, practitionerInput);
     nameModalOpen = false;
     if (sim.mode === 'idle' && scenarios.active) {
@@ -124,19 +125,21 @@
   }
 
   let lastSavedTs = $state(0);
-  async function savePracticeReport({ partial }: { partial: boolean }) {
-    if (!bundle) return;
+  let currentReportId: string | null = $state(null);
+  async function savePracticeReport({ partial }: { partial: boolean }): Promise<string | null> {
+    if (!bundle) return null;
     const now = Date.now();
-    if (now - lastSavedTs < 500) return;
+    if (now - lastSavedTs < 500 && currentReportId) return currentReportId;
     lastSavedTs = now;
-    const stamp = humanStamp();
-    const slug = slugName(practice.practitioner || 'sin_nombre');
-    const id = `${stamp}_${slug}`;
-    const report = {
+    const id = currentReportId
+      ?? `${prHumanStamp()}_${prSlugName(practice.practitioner || 'sin_nombre')}`;
+    currentReportId = id;
+    const report: PracticeReport = {
       id,
-      kind: 'practica' as const,
+      kind: 'practica',
       partial,
       ts: new Date().toISOString(),
+      date: now,
       practitioner: practice.practitioner,
       bundleId: bundle.id,
       bundleName: bundle.name ?? bundle.id,
@@ -144,20 +147,29 @@
       mode: practice.mode,
       startedMs: practice.startedMs,
       endedMs: now,
+      // Resumen sin trazas crudas (pueden ser pesadas) — se regeneran al re-abrir si hace falta.
       attempts: practice.attempts.map((a) => ({
-        ...a,
-        // Las trazas pueden ser pesadas. Si quieres almacenarlas, quita esta línea.
-        traceT: undefined,
-        traceHead: undefined,
-        traceEye: undefined,
+        itemIdx: a.itemIdx,
+        acceptanceId: a.acceptanceId,
+        side: a.side,
+        ok: a.ok,
+        peak: a.peak,
+        gain: a.gain,
+        durMs: a.durMs,
+        amp: a.amp,
+        reasons: a.reasons.slice(),
+        ts: a.ts,
+        impulseId: a.impulseId,
       })),
       achievements: practice.computeAchievements(),
+      hasPdf: practiceReports.get(id)?.hasPdf ?? false,
     };
     try {
-      await storage.writeJson(`informes/practica/${id}.json`, report);
+      await practiceReports.upsert(report);
     } catch (e) {
       console.warn('savePracticeReport', e);
     }
+    return id;
   }
   function pauseSession() {
     practice.pause();
@@ -190,11 +202,13 @@
   async function exportPdf() {
     const node = document.getElementById('ach-modal-root');
     if (!node) return;
+    // Asegura que exista una entrada de informe para asociar el PDF persistido.
+    const id = await savePracticeReport({ partial: !practice.done });
     const mod = await import('html2pdf.js');
-    const html2pdf = (mod.default ?? mod) as (typeof import('html2pdf.js'))['default'];
+    const html2pdf = (mod.default ?? mod);
     const name = practice.practitioner || 'sin_nombre';
     const filename = `${slugName(name)}_${humanStamp()}.pdf`;
-    await html2pdf()
+    const worker = html2pdf()
       .set({
         margin: 10,
         filename,
@@ -202,8 +216,25 @@
         html2canvas: { scale: 2, backgroundColor: '#ffffff' },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
       })
-      .from(node)
-      .save();
+      .from(node);
+    // Persiste copia en informes/practica/<id>.pdf y dispara descarga al usuario.
+    try {
+      const blob: Blob = await worker.outputPdf('blob');
+      if (id) {
+        try {
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          await practiceReports.writePdf(id, bytes);
+        } catch (e) {
+          console.warn('persist practice pdf', e);
+        }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 500);
+    } catch (e) {
+      console.warn('exportPdf', e);
+    }
   }
 
   function fmtMs(ms: number) {
@@ -225,6 +256,7 @@
     const prevName = practice.practitioner;
     practice.reset();
     sim.stop();
+    currentReportId = null;
     if (bundle && bundle.kind !== 'clinico') {
       practice.start(bundle, prevName);
       if (scenarios.active) sim.runScenario(scenarios.active);
