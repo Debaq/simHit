@@ -398,7 +398,6 @@
               <div class="summary-grid">
                 <div><span>Amplitud</span> ±{acceptanceActive.yawTol}° H / ±{acceptanceActive.pitchTol}° V / ±{acceptanceActive.rollTol}° R</div>
                 <div><span>Pico</span> {acceptanceActive.peakMin}–{acceptanceActive.peakMax} °/s</div>
-                <div><span>Ganancia</span> {acceptanceActive.gainMin.toFixed(2)}–{acceptanceActive.gainMax.toFixed(2)}</div>
                 <div><span>Duración</span> {acceptanceActive.durMinMs}–{acceptanceActive.durMaxMs} ms</div>
               </div>
             {/if}

@@ -133,23 +133,6 @@
         </div>
 
         <div class="grp">
-          <h3>Ganancia VOR</h3>
-          <p class="hint">Rango de ganancia para considerar el impulso válido (sin importar diagnóstico).</p>
-          <label>
-            <span>Mínima</span>
-            <input type="number" min="0" max="1.5" step="0.05"
-              value={active.gainMin} disabled={!editable}
-              oninput={(e) => patch({ gainMin: +(e.currentTarget as HTMLInputElement).value })} />
-          </label>
-          <label>
-            <span>Máxima</span>
-            <input type="number" min="0.5" max="2" step="0.05"
-              value={active.gainMax} disabled={!editable}
-              oninput={(e) => patch({ gainMax: +(e.currentTarget as HTMLInputElement).value })} />
-          </label>
-        </div>
-
-        <div class="grp">
           <h3>Duración (ms)</h3>
           <p class="hint">Duración aceptable del impulso de inicio a fin de movimiento.</p>
           <label>

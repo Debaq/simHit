@@ -116,9 +116,10 @@
     if (!selected || !selectedPreset) return null;
     const p = selectedPreset;
     const ampMax = isHorizontalSide(selected.side) ? p.yawTol : p.pitchTol;
+    // Nota: la ganancia VOR no se chequea (es métrica clínica, no criterio
+    // de aceptación). Se muestra como valor numérico sin ✓/✗.
     return {
       peak: selected.peak >= p.peakMin && selected.peak <= p.peakMax,
-      gain: selected.gain >= p.gainMin && selected.gain <= p.gainMax,
       dur:  selected.durMs >= p.durMinMs && selected.durMs <= p.durMaxMs,
       amp:  selected.amp  <= ampMax,
     };
@@ -643,8 +644,8 @@
           <span>pico {selectedChecks ? (selectedChecks.peak ? '✓' : '✗') : ''}</span>
           <b>{selected.peak.toFixed(0)}°/s</b>
         </div>
-        <div class={selectedChecks ? (selectedChecks.gain ? 'ok' : 'bad') : ''}>
-          <span>ganancia {selectedChecks ? (selectedChecks.gain ? '✓' : '✗') : ''}</span>
+        <div>
+          <span>ganancia</span>
           <b>{selected.gain.toFixed(2)}</b>
         </div>
         <div class={selectedChecks ? (selectedChecks.dur ? 'ok' : 'bad') : ''}>

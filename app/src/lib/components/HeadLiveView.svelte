@@ -600,7 +600,7 @@
 
         <div class="prom-tiles">
           {#each verdict.checks as c (c.id)}
-            {@const dec = c.id === 'gain' ? 2 : c.id === 'amp' ? 1 : 0}
+            {@const dec = c.id === 'amp' ? 1 : 0}
             {@const hint = c.ok
               ? 'OK'
               : c.id === 'amp'
@@ -652,7 +652,7 @@
       {:else if verdict}
         <div class="imp-row">
           {#each verdict.checks as c (c.id)}
-            {@const dec = c.id === 'gain' ? 2 : c.id === 'amp' ? 1 : 0}
+            {@const dec = c.id === 'amp' ? 1 : 0}
             <div class="imp-cell" class:bad={!c.ok} title={`rango ${c.min}–${c.max}${c.unit ? ' ' + c.unit : ''}`}>
               <span class="ro-lab">{c.label}</span>
               <b>{c.value.toFixed(dec)}{#if c.unit}<span class="unit">{c.unit}</span>{/if}</b>

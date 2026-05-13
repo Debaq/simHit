@@ -5,10 +5,15 @@
 // Persistencia: localStorage (datos chicos, lectura síncrona en HeadLiveView
 // y evaluateImpulse).
 //
-// Rangos H vs V: pico, ganancia, duración y desplazamiento se separan en
-// variantes horizontales (canales LL/RL) y verticales (LA/LP/RA/RP) porque
-// los planos verticales suelen tolerar otros umbrales (ver issue #13).
-// Los valores V iniciales replican los H; la UI docente los ajustará luego.
+// Rangos H vs V: pico, duración y desplazamiento se separan en variantes
+// horizontales (canales LL/RL) y verticales (LA/LP/RA/RP) porque los planos
+// verticales suelen tolerar otros umbrales (ver issue #13). Los valores V
+// iniciales replican los H; la UI docente los ajustará luego.
+//
+// Nota: la ganancia VOR (peak_ojo/peak_cabeza) NO se chequea como criterio
+// de aceptación. Es el resultado clínico medido del impulso: filtrarla
+// rechazaría como "inválidos" hallazgos patológicos legítimos (hipofunción).
+// El gain sigue exponiéndose como métrica en informes y revisor de impulsos.
 
 export interface AcceptanceCfg {
   /** Amplitud angular máxima permitida del impulso (°). Define la zona verde
@@ -22,12 +27,6 @@ export interface AcceptanceCfg {
   /** Velocidad pico de cabeza aceptable (°/s) — canales verticales. */
   peakMinV: number;
   peakMaxV: number;
-  /** Ganancia VOR aceptable — horizontales. */
-  gainMinH: number;
-  gainMaxH: number;
-  /** Ganancia VOR aceptable — verticales. */
-  gainMinV: number;
-  gainMaxV: number;
   /** Duración del impulso (ms) — horizontales. */
   durMinMsH: number;
   durMaxMsH: number;
@@ -41,10 +40,6 @@ export interface AcceptanceCfg {
   peakMin: number;
   /** @deprecated alias de peakMaxH. */
   peakMax: number;
-  /** @deprecated alias de gainMinH. */
-  gainMin: number;
-  /** @deprecated alias de gainMaxH. */
-  gainMax: number;
   /** @deprecated alias de durMinMsH. */
   durMinMs: number;
   /** @deprecated alias de durMaxMsH. */
@@ -56,24 +51,29 @@ function withLegacyAliases<T extends Partial<AcceptanceCfg>>(p: T): T {
   const out: any = { ...p };
   if (out.peakMinH !== undefined) out.peakMin = out.peakMinH;
   if (out.peakMaxH !== undefined) out.peakMax = out.peakMaxH;
-  if (out.gainMinH !== undefined) out.gainMin = out.gainMinH;
-  if (out.gainMaxH !== undefined) out.gainMax = out.gainMaxH;
   if (out.durMinMsH !== undefined) out.durMinMs = out.durMinMsH;
   if (out.durMaxMsH !== undefined) out.durMaxMs = out.durMaxMsH;
   return out as T;
 }
 
 /** Convierte un patch legado (peakMin, etc.) en sus equivalentes *H,
- *  preservando el comportamiento de la UI docente actual. */
-function migratePatchLegacy(patch: Partial<AcceptanceCfg> & { name?: string }):
+ *  preservando el comportamiento de la UI docente actual.
+ *  Campos legacy de ganancia (gainMin/gainMax) se descartan silenciosamente:
+ *  el chequeo de ganancia se eliminó del modelo de aceptación. */
+function migratePatchLegacy(patch: Partial<AcceptanceCfg> & { name?: string; gainMin?: number; gainMax?: number }):
   Partial<AcceptanceCfg> & { name?: string } {
   const out: any = { ...patch };
   if ('peakMin' in patch && out.peakMinH === undefined) out.peakMinH = (patch as any).peakMin;
   if ('peakMax' in patch && out.peakMaxH === undefined) out.peakMaxH = (patch as any).peakMax;
-  if ('gainMin' in patch && out.gainMinH === undefined) out.gainMinH = (patch as any).gainMin;
-  if ('gainMax' in patch && out.gainMaxH === undefined) out.gainMaxH = (patch as any).gainMax;
   if ('durMinMs' in patch && out.durMinMsH === undefined) out.durMinMsH = (patch as any).durMinMs;
   if ('durMaxMs' in patch && out.durMaxMsH === undefined) out.durMaxMsH = (patch as any).durMaxMs;
+  // Descartar cualquier campo de ganancia que pueda venir de patches legados.
+  delete out.gainMin;
+  delete out.gainMax;
+  delete out.gainMinH;
+  delete out.gainMaxH;
+  delete out.gainMinV;
+  delete out.gainMaxV;
   return out;
 }
 
@@ -98,12 +98,10 @@ const BUILTIN: AcceptancePreset[] = [
     yawTol: 30, pitchTol: 30, rollTol: 30,
     peakMinH: 70,  peakMaxH: 320,
     peakMinV: 70,  peakMaxV: 320,
-    gainMinH: 0.30, gainMaxH: 1.60,
-    gainMinV: 0.30, gainMaxV: 1.60,
     durMinMsH: 60, durMaxMsH: 320,
     durMinMsV: 60, durMaxMsV: 320,
     // Aliases legados — los rellena withLegacyAliases.
-    peakMin: 0, peakMax: 0, gainMin: 0, gainMax: 0, durMinMs: 0, durMaxMs: 0,
+    peakMin: 0, peakMax: 0, durMinMs: 0, durMaxMs: 0,
   }),
   makeBuiltin({
     id: 'estandar',
@@ -112,11 +110,9 @@ const BUILTIN: AcceptancePreset[] = [
     yawTol: 20, pitchTol: 20, rollTol: 20,
     peakMinH: 100, peakMaxH: 280,
     peakMinV: 100, peakMaxV: 280,
-    gainMinH: 0.40, gainMaxH: 1.40,
-    gainMinV: 0.40, gainMaxV: 1.40,
     durMinMsH: 80, durMaxMsH: 260,
     durMinMsV: 80, durMaxMsV: 260,
-    peakMin: 0, peakMax: 0, gainMin: 0, gainMax: 0, durMinMs: 0, durMaxMs: 0,
+    peakMin: 0, peakMax: 0, durMinMs: 0, durMaxMs: 0,
   }),
   makeBuiltin({
     id: 'avanzado',
@@ -125,11 +121,9 @@ const BUILTIN: AcceptancePreset[] = [
     yawTol: 10, pitchTol: 10, rollTol: 10,
     peakMinH: 130, peakMaxH: 250,
     peakMinV: 130, peakMaxV: 250,
-    gainMinH: 0.50, gainMaxH: 1.30,
-    gainMinV: 0.50, gainMaxV: 1.30,
     durMinMsH: 100, durMaxMsH: 230,
     durMinMsV: 100, durMaxMsV: 230,
-    peakMin: 0, peakMax: 0, gainMin: 0, gainMax: 0, durMinMs: 0, durMaxMs: 0,
+    peakMin: 0, peakMax: 0, durMinMs: 0, durMaxMs: 0,
   }),
 ];
 
@@ -138,7 +132,9 @@ const LS_ACTIVE = 'simhit:acceptance:active';
 
 /** Normaliza un preset legado: conserva sólo los campos del schema actual.
  *  Si vienen los campos sin sufijo (peakMin/peakMax/etc.), se duplican como
- *  *H y *V para mantener compatibilidad con presets creados antes de F0. */
+ *  *H y *V para mantener compatibilidad con presets creados antes de F0.
+ *  Campos antiguos de ganancia (gainMin, gainMax, gainMinH/V, gainMaxH/V)
+ *  se ignoran silenciosamente: el chequeo de ganancia se eliminó. */
 function sanitizePreset(p: any): AcceptancePreset | null {
   if (!p || typeof p !== 'object' || !p.id || p.builtin) return null;
   // Migración legado → H/V: si no existe *H, leer del campo sin sufijo.
@@ -146,10 +142,6 @@ function sanitizePreset(p: any): AcceptancePreset | null {
   const peakMaxH = p.peakMaxH ?? p.peakMax;
   const peakMinV = p.peakMinV ?? p.peakMin;
   const peakMaxV = p.peakMaxV ?? p.peakMax;
-  const gainMinH = p.gainMinH ?? p.gainMin;
-  const gainMaxH = p.gainMaxH ?? p.gainMax;
-  const gainMinV = p.gainMinV ?? p.gainMin;
-  const gainMaxV = p.gainMaxV ?? p.gainMax;
   const durMinMsH = p.durMinMsH ?? p.durMinMs;
   const durMaxMsH = p.durMaxMsH ?? p.durMaxMs;
   const durMinMsV = p.durMinMsV ?? p.durMinMs;
@@ -165,16 +157,12 @@ function sanitizePreset(p: any): AcceptancePreset | null {
     peakMaxH: Number(peakMaxH),
     peakMinV: Number(peakMinV),
     peakMaxV: Number(peakMaxV),
-    gainMinH: Number(gainMinH),
-    gainMaxH: Number(gainMaxH),
-    gainMinV: Number(gainMinV),
-    gainMaxV: Number(gainMaxV),
     durMinMsH: Number(durMinMsH),
     durMaxMsH: Number(durMaxMsH),
     durMinMsV: Number(durMinMsV),
     durMaxMsV: Number(durMaxMsV),
     // Aliases legados — los completa withLegacyAliases.
-    peakMin: 0, peakMax: 0, gainMin: 0, gainMax: 0, durMinMs: 0, durMaxMs: 0,
+    peakMin: 0, peakMax: 0, durMinMs: 0, durMaxMs: 0,
   });
 }
 
@@ -229,11 +217,9 @@ class AcceptanceStore {
       yawTol: seed.yawTol, pitchTol: seed.pitchTol, rollTol: seed.rollTol,
       peakMinH: seed.peakMinH, peakMaxH: seed.peakMaxH,
       peakMinV: seed.peakMinV, peakMaxV: seed.peakMaxV,
-      gainMinH: seed.gainMinH, gainMaxH: seed.gainMaxH,
-      gainMinV: seed.gainMinV, gainMaxV: seed.gainMaxV,
       durMinMsH: seed.durMinMsH, durMaxMsH: seed.durMaxMsH,
       durMinMsV: seed.durMinMsV, durMaxMsV: seed.durMaxMsV,
-      peakMin: 0, peakMax: 0, gainMin: 0, gainMax: 0, durMinMs: 0, durMaxMs: 0,
+      peakMin: 0, peakMax: 0, durMinMs: 0, durMaxMs: 0,
     });
     this.custom = [...this.custom, preset];
     this.persist();

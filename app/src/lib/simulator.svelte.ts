@@ -87,7 +87,13 @@ function integrateAmplitude(t: Float64Array, head: Float64Array): number {
 
 // Heurística simple de aceptación de impulso. Rangos configurables vía
 // store `acceptance` (presets principiante / estándar / avanzado / custom).
-export type CheckId = 'peak' | 'gain' | 'dur' | 'amp';
+//
+// Nota: la ganancia VOR no se chequea como criterio de aceptación. Es el
+// resultado clínico medido del impulso (peak_ojo/peak_cabeza), no una
+// métrica de calidad de ejecución. Filtrar por ganancia rechazaría
+// hallazgos patológicos legítimos (hipofunción). Sigue como métrica en
+// el verdict (Verdict.gain) e informes, pero no marca ok=false.
+export type CheckId = 'peak' | 'dur' | 'amp';
 export interface Check {
   id: CheckId;
   label: string;
@@ -119,12 +125,11 @@ function evaluateImpulse(imp: Impulse, peakHead: number, gain: number): Verdict 
   const amp = integrateAmplitude(imp.t, imp.head);
   const horiz = isHorizontalSide(imp.side);
   // Rangos según plano: amplitud máxima por yawTol (H) o pitchTol (V);
-  // pico/ganancia/duración por la variante *H o *V del preset.
+  // pico/duración por la variante *H o *V del preset. La ganancia se
+  // recibe y se devuelve como métrica clínica, pero no se chequea.
   const ampMax = horiz ? cfg.yawTol : cfg.pitchTol;
   const peakMin = horiz ? cfg.peakMinH : cfg.peakMinV;
   const peakMax = horiz ? cfg.peakMaxH : cfg.peakMaxV;
-  const gainMin = horiz ? cfg.gainMinH : cfg.gainMinV;
-  const gainMax = horiz ? cfg.gainMaxH : cfg.gainMaxV;
   const durMin  = horiz ? cfg.durMinMsH : cfg.durMinMsV;
   const durMax  = horiz ? cfg.durMaxMsH : cfg.durMaxMsV;
   const checks: Check[] = [
@@ -132,13 +137,11 @@ function evaluateImpulse(imp: Impulse, peakHead: number, gain: number): Verdict 
       ok: amp <= ampMax },
     { id: 'peak', label: 'pico',     value: peakHead, min: peakMin,  max: peakMax, unit: '°/s',
       ok: peakHead >= peakMin && peakHead <= peakMax },
-    { id: 'gain', label: 'ganancia', value: gain,     min: gainMin,  max: gainMax, unit: '',
-      ok: gain >= gainMin && gain <= gainMax },
     { id: 'dur',  label: 'duración', value: durMs,    min: durMin,   max: durMax,  unit: 'ms',
       ok: durMs >= durMin && durMs <= durMax },
   ];
   const fmt = (c: Check) => {
-    const dec = c.id === 'gain' ? 2 : c.id === 'amp' ? 1 : 0;
+    const dec = c.id === 'amp' ? 1 : 0;
     return `${c.label} ${c.value.toFixed(dec)} fuera de ${c.min}–${c.max}${c.unit ? ' ' + c.unit : ''}`;
   };
   const reasons = checks.filter((c) => !c.ok).map(fmt);
