@@ -17,10 +17,7 @@
   let active = $derived(bundles.active);
 
   async function newBundle(kind: BundleKind = 'clinico') {
-    const defaultName = kind === 'clinico' ? 'Nuevo escenario'
-      : kind === 'practica-horiz' ? 'Práctica horizontal'
-      : kind === 'practica-vert' ? 'Práctica vertical'
-      : 'Práctica multicanal';
+    const defaultName = kind === 'clinico' ? 'Nuevo escenario' : 'Práctica vHIT';
     const name = await ui.prompt('Nombre del escenario', defaultName);
     if (!name) return;
     bundles.create(name, kind);
@@ -30,32 +27,20 @@
     if (!active) return;
     bundles.update(active.id, { goals });
   }
-  function addGoal(acceptanceId: string) {
+  function addGoal() {
     if (!active) return;
     const cur = active.goals ?? [];
-    if (cur.some((g) => g.acceptanceId === acceptanceId)) return;
-    setGoals([...cur, { acceptanceId, count: 3 }]);
+    const defaultLevel = acceptance.all[0]?.id ?? 'estandar';
+    setGoals([...cur, { acceptanceId: defaultLevel, count: 5, targetChannel: 'LL' }]);
   }
-  function updateGoalCount(acceptanceId: string, count: number) {
-    if (!active) return;
-    const cur = active.goals ?? [];
-    setGoals(cur.map((g) => g.acceptanceId === acceptanceId ? { ...g, count: Math.max(0, count | 0) } : g));
-  }
-  /** En 'practica-multi' los goals pueden repetir acceptanceId con distintos
-   *  targetChannel. La clave estable es el índice de posición. */
-  function updateGoalCountAt(idx: number, count: number) {
+  /** Actualiza un goal por índice. Permite cambiar canal y/o nivel de cada
+   *  objetivo de forma independiente; los goals pueden repetir combinaciones. */
+  function updateGoalAt(idx: number, patch: Partial<PracticeGoal>) {
     if (!active) return;
     const cur = (active.goals ?? []).slice();
     if (idx < 0 || idx >= cur.length) return;
-    cur[idx] = { ...cur[idx], count: Math.max(0, count | 0) };
-    setGoals(cur);
-  }
-  function updateGoalChannelAt(idx: number, ch: Channel | '') {
-    if (!active) return;
-    const cur = (active.goals ?? []).slice();
-    if (idx < 0 || idx >= cur.length) return;
-    const next: PracticeGoal = { acceptanceId: cur[idx].acceptanceId, count: cur[idx].count };
-    if (ch) next.targetChannel = ch;
+    const next: PracticeGoal = { ...cur[idx], ...patch };
+    next.count = Math.max(0, (next.count as number) | 0);
     cur[idx] = next;
     setGoals(cur);
   }
@@ -72,25 +57,6 @@
     const j = idx + dir;
     if (idx < 0 || j < 0 || j >= cur.length) return;
     [cur[idx], cur[j]] = [cur[j], cur[idx]];
-    setGoals(cur);
-  }
-  function addMultiGoal(acceptanceId: string, channel: Channel) {
-    if (!active) return;
-    const cur = active.goals ?? [];
-    setGoals([...cur, { acceptanceId, count: 5, targetChannel: channel }]);
-  }
-  function removeGoal(acceptanceId: string) {
-    if (!active) return;
-    const cur = active.goals ?? [];
-    setGoals(cur.filter((g) => g.acceptanceId !== acceptanceId));
-  }
-  function moveGoal(acceptanceId: string, dir: -1 | 1) {
-    if (!active) return;
-    const cur = (active.goals ?? []).slice();
-    const i = cur.findIndex((g) => g.acceptanceId === acceptanceId);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= cur.length) return;
-    [cur[i], cur[j]] = [cur[j], cur[i]];
     setGoals(cur);
   }
   function setOrder(order: PracticeOrder) {
@@ -112,10 +78,7 @@
     bundles.update(active.id, patch);
   }
   function kindLabel(k: BundleKind) {
-    return k === 'clinico' ? 'Clínico'
-      : k === 'practica-horiz' ? 'Práctica H'
-      : k === 'practica-vert' ? 'Práctica V'
-      : 'Práctica M';
+    return k === 'clinico' ? 'Clínico' : 'Práctica';
   }
 
   function pick(id: string) { bundles.setActive(id); }
@@ -149,9 +112,6 @@
   let allCasos = $derived([...scenarios.examples, ...scenarios.list]);
   let goalsView = $derived<PracticeGoal[]>(active?.goals ?? []);
   let goalsTotal = $derived(goalsView.reduce((a, g) => a + g.count, 0));
-  let availableLevels = $derived(
-    acceptance.all.filter((p) => !goalsView.some((g) => g.acceptanceId === p.id))
-  );
   function levelName(id: string) {
     return acceptance.all.find((p) => p.id === id)?.name ?? id;
   }
@@ -167,9 +127,7 @@
     <aside class="left">
       <div class="section-title">Escenarios</div>
       <button class="primary" onclick={() => newBundle('clinico')}>+ Clínico</button>
-      <button class="primary alt" onclick={() => newBundle('practica-horiz')}>+ Práctica H</button>
-      <button class="primary alt" onclick={() => newBundle('practica-vert')}>+ Práctica V</button>
-      <button class="primary alt" onclick={() => newBundle('practica-multi')}>+ Práctica M</button>
+      <button class="primary alt" onclick={() => newBundle('practica')}>+ Práctica</button>
       <ul>
         {#each bundles.list as b (b.id)}
           <li class:active={b.id === bundles.activeId}>
@@ -224,9 +182,7 @@
           <span class="kind-lab">Tipo:</span>
           <select value={active.kind} onchange={(e) => setKind((e.currentTarget as HTMLSelectElement).value as BundleKind)}>
             <option value="clinico">Clínico</option>
-            <option value="practica-horiz">Práctica — Horizontal</option>
-            <option value="practica-vert">Práctica — Vertical</option>
-            <option value="practica-multi">Práctica — Multicanal (6 canales)</option>
+            <option value="practica">Práctica vHIT</option>
           </select>
         </section>
 
@@ -255,9 +211,9 @@
                 </label>
               </div>
               <p class="muted small">
-                Canales: {active.kind === 'practica-horiz' ? 'horizontales (LL/RL)'
-                  : active.kind === 'practica-vert' ? 'verticales (LA/RP/RA/LP)'
-                  : 'los 6 canales — cada objetivo fija un canal específico'}.
+                Cada objetivo define un canal anatómico específico (LL/RL/LA/RP/RA/LP)
+                y un nivel de dificultad. Se pueden repetir combinaciones (p. ej. dos
+                objetivos en el mismo canal con distinto nivel).
               </p>
             </div>
 
@@ -267,73 +223,42 @@
                 <a class="edit-link" href="/docente/dificultad">Editar niveles →</a>
               </div>
 
-              {#if active.kind === 'practica-multi'}
-                <!-- Multi: cada goal lleva un targetChannel obligatorio. La clave
-                     estable es el índice (no acceptanceId) porque puede repetirse. -->
-                {#if goalsView.length === 0}
-                  <p class="muted">— sin objetivos —</p>
-                {:else}
-                  <ul class="goal-list multi">
-                    {#each goalsView as g, i (i)}
-                      <li>
-                        <select class="g-channel"
-                          value={g.targetChannel ?? ''}
-                          onchange={(e) => updateGoalChannelAt(i, (e.currentTarget as HTMLSelectElement).value as Channel | '')}
-                        >
-                          <option value="">— canal —</option>
-                          {#each CHANNELS as c (c)}
-                            <option value={c}>{c} · {CHANNEL_LABELS[c]}</option>
-                          {/each}
-                        </select>
-                        <div class="g-name muted small">{levelName(g.acceptanceId)}</div>
-                        <input class="g-count" type="number" min="0" max="99" value={g.count}
-                          oninput={(e) => updateGoalCountAt(i, +(e.currentTarget as HTMLInputElement).value)} />
-                        <span class="g-unit">{active.mode === 'hits' ? 'aciertos' : 'intentos'}</span>
-                        <button class="g-mv" disabled={i === 0} onclick={() => moveGoalAt(i, -1)} title="Subir">↑</button>
-                        <button class="g-mv" disabled={i === goalsView.length - 1} onclick={() => moveGoalAt(i, 1)} title="Bajar">↓</button>
-                        <button class="g-del" onclick={() => removeGoalAt(i)} title="Quitar">×</button>
-                      </li>
-                    {/each}
-                  </ul>
-                  <div class="g-total">Total: <b>{goalsTotal}</b> {active.mode === 'hits' ? 'aciertos' : 'intentos'}</div>
-                {/if}
-                <div class="g-add">
-                  <span class="muted small">Agregar objetivo por canal:</span>
-                  {#each CHANNELS as c (c)}
-                    <button class="g-add-btn" onclick={() => addMultiGoal(active.acceptanceId, c)}>+ {c}</button>
-                  {/each}
-                </div>
+              {#if goalsView.length === 0}
+                <p class="muted">— sin objetivos —</p>
               {:else}
-                {#if goalsView.length === 0}
-                  <p class="muted">— sin objetivos —</p>
-                {:else}
-                  <ul class="goal-list">
-                    {#each goalsView as g, i (g.acceptanceId)}
-                      <li>
-                        <div class="g-name"><b>{levelName(g.acceptanceId)}</b></div>
-                        <input class="g-count" type="number" min="0" max="99" value={g.count}
-                          oninput={(e) => updateGoalCount(g.acceptanceId, +(e.currentTarget as HTMLInputElement).value)} />
-                        <span class="g-unit">{active.mode === 'hits' ? 'aciertos' : 'intentos'}</span>
-                        <button class="g-mv" disabled={i === 0} onclick={() => moveGoal(g.acceptanceId, -1)} title="Subir">↑</button>
-                        <button class="g-mv" disabled={i === goalsView.length - 1} onclick={() => moveGoal(g.acceptanceId, 1)} title="Bajar">↓</button>
-                        <button class="g-del" onclick={() => removeGoal(g.acceptanceId)} title="Quitar">×</button>
-                      </li>
-                    {/each}
-                  </ul>
-                  <div class="g-total">Total: <b>{goalsTotal}</b> {active.mode === 'hits' ? 'aciertos' : 'intentos'}</div>
-                {/if}
-
-                {#if availableLevels.length}
-                  <div class="g-add">
-                    <span class="muted small">Agregar nivel:</span>
-                    {#each availableLevels as p (p.id)}
-                      <button class="g-add-btn" onclick={() => addGoal(p.id)}>+ {p.name}</button>
-                    {/each}
-                  </div>
-                {:else}
-                  <p class="muted small">Todos los niveles están agregados. Crea más en el editor de niveles.</p>
-                {/if}
+                <ul class="goal-list unified">
+                  {#each goalsView as g, i (i)}
+                    <li>
+                      <select class="g-channel"
+                        value={g.targetChannel}
+                        onchange={(e) => updateGoalAt(i, { targetChannel: (e.currentTarget as HTMLSelectElement).value as Channel })}
+                      >
+                        {#each CHANNELS as c (c)}
+                          <option value={c}>{c} · {CHANNEL_LABELS[c]}</option>
+                        {/each}
+                      </select>
+                      <select class="g-level"
+                        value={g.acceptanceId}
+                        onchange={(e) => updateGoalAt(i, { acceptanceId: (e.currentTarget as HTMLSelectElement).value })}
+                      >
+                        {#each acceptance.all as p (p.id)}
+                          <option value={p.id}>{p.name}</option>
+                        {/each}
+                      </select>
+                      <input class="g-count" type="number" min="0" max="99" value={g.count}
+                        oninput={(e) => updateGoalAt(i, { count: +(e.currentTarget as HTMLInputElement).value })} />
+                      <span class="g-unit">{active.mode === 'hits' ? 'aciertos' : 'intentos'}</span>
+                      <button class="g-mv" disabled={i === 0} onclick={() => moveGoalAt(i, -1)} title="Subir">↑</button>
+                      <button class="g-mv" disabled={i === goalsView.length - 1} onclick={() => moveGoalAt(i, 1)} title="Bajar">↓</button>
+                      <button class="g-del" onclick={() => removeGoalAt(i)} title="Quitar">×</button>
+                    </li>
+                  {/each}
+                </ul>
+                <div class="g-total">Total: <b>{goalsTotal}</b> {active.mode === 'hits' ? 'aciertos' : 'intentos'}</div>
               {/if}
+              <div class="g-add">
+                <button class="g-add-btn" onclick={addGoal}>+ Agregar objetivo</button>
+              </div>
             </div>
           </section>
         {:else}
@@ -472,9 +397,7 @@
     background: var(--surface-2); color: var(--text-muted);
     text-transform: uppercase; letter-spacing: .04em; font-weight: 700;
   }
-  .kind-tag.kind-practica-horiz { background: #fde68a; color: #92400e; }
-  .kind-tag.kind-practica-vert { background: #c7d2fe; color: #3730a3; }
-  .kind-tag.kind-practica-multi { background: #bbf7d0; color: #14532d; }
+  .kind-tag.kind-practica { background: #bbf7d0; color: #14532d; }
 
   main.canvas {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -556,9 +479,14 @@
     background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius-sm);
   }
-  /* Variante multi: añade columna `canal` antes del nombre del nivel. */
-  .goal-list.multi li {
+  /* Variante unificada: canal + nivel + count + acciones. */
+  .goal-list.unified li {
     grid-template-columns: 170px 1fr 80px 70px 28px 28px 28px;
+  }
+  .g-level {
+    font: inherit; font-size: 12px;
+    padding: 4px 8px; border: 1px solid var(--border-strong);
+    border-radius: 4px; background: var(--surface-2); color: var(--text);
   }
   .g-channel {
     font: inherit; font-size: 12px;
