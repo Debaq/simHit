@@ -128,6 +128,7 @@
       <div class="section-title">Escenarios</div>
       <button class="primary" onclick={() => newBundle('clinico')}>+ Clínico</button>
       <button class="primary alt" onclick={() => newBundle('practica-horiz')}>+ Práctica H</button>
+      <button class="primary alt" onclick={() => newBundle('practica-vert')}>+ Práctica V</button>
       <ul>
         {#each bundles.list as b (b.id)}
           <li class:active={b.id === bundles.activeId}>
@@ -183,7 +184,7 @@
           <select value={active.kind} onchange={(e) => setKind((e.currentTarget as HTMLSelectElement).value as BundleKind)}>
             <option value="clinico">Clínico</option>
             <option value="practica-horiz">Práctica — Horizontal</option>
-            <option value="practica-vert" disabled>Práctica — Vertical (próximamente)</option>
+            <option value="practica-vert">Práctica — Vertical</option>
           </select>
         </section>
 

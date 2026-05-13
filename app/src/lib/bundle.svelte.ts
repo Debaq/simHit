@@ -44,7 +44,7 @@ export function defaultGoals(): PracticeGoal[] {
 const LS_LIST = 'simhit:bundles:list';
 const LS_ACTIVE = 'simhit:bundles:active';
 /** Versionado: bumpear cuando se agregan nuevos seeds para que usuarios viejos los vean. */
-const LS_SEEDED = 'simhit:bundles:seeded:v2';
+const LS_SEEDED = 'simhit:bundles:seeded:v3';
 
 // Escenarios de muestra que se siembran la primera vez. El docente puede
 // borrarlos y no vuelven (la flag `seeded` queda persistida).
@@ -89,6 +89,18 @@ function buildStarterBundles(): Escenario[] {
       order: 'random',
       mode: 'attempts',
       updated: now - 3,
+    },
+    {
+      id: 'es_seed_practica_v',
+      name: '5. Práctica vertical',
+      kind: 'practica-vert',
+      casoId: '',
+      acceptanceId: 'estandar',
+      eyesetId: '',
+      goals: defaultGoals(),
+      order: 'random',
+      mode: 'attempts',
+      updated: now - 4,
     },
   ];
 }

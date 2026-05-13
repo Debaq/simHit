@@ -196,15 +196,78 @@
           </div>
 
           <div class="grp">
-            <div class="grp-title">Canales verticales <span class="soon">próximamente</span></div>
+            <div class="grp-title">Canales verticales</div>
             <div class="row">
               {#each VERTICAL_CHANNELS as ch (ch)}
-                <div class="ch-card disabled">
+                {@const cfg = activeScenario.channels[ch]}
+                <div class="ch-card">
                   <div class="ch-hd">
                     <span class="ch-key">{ch}</span>
                     <span class="ch-name">{CHANNEL_LABELS[ch]}</span>
                   </div>
-                  <p class="muted">Disponible cuando la cámara detecte movimientos verticales.</p>
+
+                  <label class="field">
+                    <span class="lbl">Ganancia VOR <em>{cfg.gain.toFixed(2)}</em></span>
+                    <input
+                      type="range" min="0" max="1.5" step="0.05"
+                      value={cfg.gain}
+                      disabled={!editable}
+                      oninput={(e) => updateChannel(ch, { gain: +(e.currentTarget as HTMLInputElement).value })}
+                    />
+                  </label>
+
+                  <label class="field">
+                    <span class="lbl">Velocidad pico <em>{cfg.peakVel} °/s</em></span>
+                    <input
+                      type="range" min="80" max="300" step="5"
+                      value={cfg.peakVel}
+                      disabled={!editable}
+                      oninput={(e) => updateChannel(ch, { peakVel: +(e.currentTarget as HTMLInputElement).value })}
+                    />
+                  </label>
+
+                  <label class="field">
+                    <span class="lbl">Sacada correctiva</span>
+                    <select
+                      value={cfg.saccade}
+                      disabled={!editable}
+                      onchange={(e) => updateChannel(ch, { saccade: (e.currentTarget as HTMLSelectElement).value as ChannelConfig['saccade'] })}
+                    >
+                      <option value="none">Ninguna</option>
+                      <option value="covert">Cubierta</option>
+                      <option value="overt">Manifiesta</option>
+                    </select>
+                  </label>
+
+                  <div class="art">
+                    <div class="art-hd">
+                      <span class="lbl">Artefactos</span>
+                      <button disabled={!editable} onclick={() => addArtifact(ch)}>+ Añadir</button>
+                    </div>
+                    {#if cfg.artifacts.length === 0}
+                      <p class="muted">Sin artefactos (hereda del set de ojos activo).</p>
+                    {/if}
+                    {#each cfg.artifacts as a, i (i)}
+                      <div class="art-row">
+                        <select
+                          value={a.artifact}
+                          disabled={!editable}
+                          onchange={(e) => updateArtifact(ch, i, { artifact: (e.currentTarget as HTMLSelectElement).value as ArtifactKind })}
+                        >
+                          {#each ARTIFACT_OPTIONS as opt}
+                            <option value={opt.value}>{opt.label}</option>
+                          {/each}
+                        </select>
+                        <input
+                          type="number" min="0" max="1" step="0.05"
+                          value={a.probability}
+                          disabled={!editable}
+                          oninput={(e) => updateArtifact(ch, i, { probability: +(e.currentTarget as HTMLInputElement).value })}
+                        />
+                        <button class="del" disabled={!editable} onclick={() => removeArtifact(ch, i)}>×</button>
+                      </div>
+                    {/each}
+                  </div>
                 </div>
               {/each}
             </div>
