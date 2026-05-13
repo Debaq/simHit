@@ -2,17 +2,61 @@
   import { sim, type ImpulseSide } from '$lib/simulator.svelte';
   import { serial, type Axis, type AxesConfig } from '$lib/serial.svelte';
   import { acceptance } from '$lib/acceptance.svelte';
-  import { CHANNEL_LABELS } from '$lib/scenario.svelte';
+  import { CHANNEL_LABELS, VERTICAL_CHANNELS, type Channel } from '$lib/scenario.svelte';
 
   // Etiqueta de lado del impulso para el HUD. Mapea los 6 canales a
-  // izquierda/derecha (la pertenencia al plano vertical no se muestra aquí —
-  // queda como TODO[#13 F0.5] para la marca diagonal en HeadLiveView).
+  // izquierda/derecha. El canal específico (con plano LARP/RALP) lo expone
+  // `CHANNEL_LABELS` directamente en el chip del último impulso.
   function sideClass(s: ImpulseSide | undefined): 'left' | 'right' | '' {
     if (!s) return '';
     return s.startsWith('L') ? 'left' : 'right';
   }
 
-  let { impulseLayout = 'compact' as 'compact' | 'prominent' } = $props();
+  let {
+    impulseLayout = 'compact' as 'compact' | 'prominent',
+    /**
+     * Canal objetivo activo. Si está definido y es vertical, se dibuja la
+     * marca de pose diagonal (yaw ≈ ±45°) y se ajusta el mensaje correctivo.
+     * Si está indefinido, comportamiento histórico (pose neutra yaw/pitch=0).
+     * Valor especial `'vert-any'`: práctica vertical sin canal único — se
+     * eligen dinámicamente los dos planos (LARP + RALP) como objetivos válidos.
+     */
+    targetChannel = undefined as Channel | 'vert-any' | undefined,
+  } = $props();
+
+  // ── Pose objetivo por canal (F0.5) ──────────────────────────────────────
+  // Los planos verticales parten con la cabeza girada ±45° en yaw. El pitch
+  // objetivo es 0 (cabeza neutra en cabeceo): el impulso pitch se realiza
+  // DESDE esa pose, no antes de ella.
+  const POSE_TARGETS: Record<Channel, { yaw: number; pitch: number }> = {
+    LL: { yaw: 0,   pitch: 0 },
+    RL: { yaw: 0,   pitch: 0 },
+    LA: { yaw: -45, pitch: 0 },  // LARP
+    RP: { yaw: -45, pitch: 0 },  // LARP
+    RA: { yaw: +45, pitch: 0 },  // RALP
+    LP: { yaw: +45, pitch: 0 },  // RALP
+  };
+
+  function isVerticalChannel(c: Channel): boolean {
+    return VERTICAL_CHANNELS.includes(c);
+  }
+
+  /** Marcas diagonales activas en la vista superior (yaw).
+   *  - Canal específico → una marca a su yaw_target.
+   *  - 'vert-any'       → dos marcas (-45, +45) cubriendo LARP y RALP.
+   *  - undefined o LL/RL → ninguna (zona verde neutra).
+   */
+  let yawTargets = $derived.by<number[]>(() => {
+    if (targetChannel === 'vert-any') return [-45, 45];
+    if (targetChannel && isVerticalChannel(targetChannel)) {
+      return [POSE_TARGETS[targetChannel].yaw];
+    }
+    return [];
+  });
+  let targetChannelLabel = $derived.by(() => {
+    if (!targetChannel || targetChannel === 'vert-any') return null;
+    return `${targetChannel} · ${CHANNEL_LABELS[targetChannel]}`;
+  });
 
   let showAxes = $state(false);
   const AXES: Axis[] = ['x', 'y', 'z'];
@@ -91,11 +135,38 @@
     return () => cancelAnimationFrame(raf);
   });
 
+  /** Yaw objetivo efectivo: 0 para horizontal/sin objetivo; ±45 para vertical
+   *  específico; el más cercano al yaw actual si 'vert-any'. */
+  let activeYawTarget = $derived.by<number>(() => {
+    if (yawTargets.length === 0) return 0;
+    if (yawTargets.length === 1) return yawTargets[0];
+    // 'vert-any': elegir el target más cercano a la pose actual (sticky).
+    return yawTargets.reduce((best, y) =>
+      Math.abs(yaw - y) < Math.abs(yaw - best) ? y : best,
+    yawTargets[0]);
+  });
+
+  /** Mensaje "gira más a izq/der hacia ~45°" para planos verticales. */
+  function yawCorrection(): string | null {
+    if (yawTargets.length === 0) return null;
+    const delta = yaw - activeYawTarget;
+    if (Math.abs(delta) <= YAW_TOL) return null;
+    const side = delta > 0 ? 'izquierda' : 'derecha';
+    return `gira la cabeza más a la ${side} hasta ~${Math.abs(activeYawTarget)}°`;
+  }
+
   let poseOk = $derived(
-    Math.abs(yaw) <= YAW_TOL && Math.abs(pitch) <= PITCH_TOL && Math.abs(roll) <= ROLL_TOL
+    Math.abs(yaw - activeYawTarget) <= YAW_TOL &&
+    Math.abs(pitch) <= PITCH_TOL &&
+    Math.abs(roll) <= ROLL_TOL
   );
   let poseLabel = $derived.by(() => {
-    if (poseOk) return { txt: 'Pose neutra OK', cls: 'ok' };
+    if (poseOk) {
+      const txt = yawTargets.length > 0 ? `Pose objetivo OK (yaw ~${activeYawTarget}°)` : 'Pose neutra OK';
+      return { txt, cls: 'ok' };
+    }
+    const yawErr = yawCorrection();
+    if (yawErr) return { txt: 'Corregir: ' + yawErr, cls: 'warn' };
     const errs = [
       { v: Math.abs(yaw) - YAW_TOL, msg: yaw < 0 ? 'gira a la derecha' : 'gira a la izquierda' },
       { v: Math.abs(pitch) - PITCH_TOL, msg: pitch < 0 ? 'baja la cabeza' : 'sube la cabeza' },
@@ -151,7 +222,11 @@
   $effect(() => {
     const id = setInterval(() => {
       const now = performance.now();
-      const yawNeedsCal = Math.abs(serial.poseYaw) > YAW_TOL;
+      // Sólo evaluamos auto-calibración cuando se espera pose neutra en yaw
+      // (canal horizontal o sin objetivo). En planos verticales el yaw objetivo
+      // es ±45°, así que "fuera del verde" no implica calibración pendiente.
+      const expectNeutralYaw = yawTargets.length === 0;
+      const yawNeedsCal = expectNeutralYaw && Math.abs(serial.poseYaw) > YAW_TOL;
       // Si pitch o roll están fuera de la banda amarilla, el equipo no está
       // sobre la cabeza (apoyado en mesa, descolgado, etc.). No auto-calibrar.
       const headMounted =
@@ -243,6 +318,11 @@
   <div class="panel pose">
     <div class="panel-title">
       <span>Posición de la cabeza</span>
+      {#if targetChannelLabel}
+        <span class="target-chip" title="Canal objetivo activo">🎯 {targetChannelLabel}</span>
+      {:else if targetChannel === 'vert-any'}
+        <span class="target-chip" title="Plano vertical: cualquiera (LARP o RALP)">🎯 Vertical (LARP/RALP)</span>
+      {/if}
       <span class="pose-tag" class:ok={poseOk} class:warn={!poseOk}>
         {poseOk ? '✓' : '!'} {poseLabel.txt}
       </span>
@@ -316,11 +396,31 @@
             d={`M 0 0 L ${90 * Math.sin(-YAW_WARN * Math.PI / 180)} ${-90 * Math.cos(-YAW_WARN * Math.PI / 180)} A 90 90 0 0 1 ${90 * Math.sin(YAW_WARN * Math.PI / 180)} ${-90 * Math.cos(YAW_WARN * Math.PI / 180)} Z`}
             fill="#facc15"
           />
-          <!-- Zona objetivo yaw (cono ±YAW_TOL hacia frente) -->
-          <path
-            d={`M 0 0 L ${90 * Math.sin(-YAW_TOL * Math.PI / 180)} ${-90 * Math.cos(-YAW_TOL * Math.PI / 180)} A 90 90 0 0 1 ${90 * Math.sin(YAW_TOL * Math.PI / 180)} ${-90 * Math.cos(YAW_TOL * Math.PI / 180)} Z`}
-            fill="#22c55e"
-          />
+          {#if yawTargets.length === 0}
+            <!-- Zona objetivo yaw (cono ±YAW_TOL hacia frente) -->
+            <path
+              d={`M 0 0 L ${90 * Math.sin(-YAW_TOL * Math.PI / 180)} ${-90 * Math.cos(-YAW_TOL * Math.PI / 180)} A 90 90 0 0 1 ${90 * Math.sin(YAW_TOL * Math.PI / 180)} ${-90 * Math.cos(YAW_TOL * Math.PI / 180)} Z`}
+              fill="#22c55e"
+            />
+          {:else}
+            <!-- F0.5: zona(s) verde(s) proyectada(s) sobre yaw_target diagonal
+                 (planos LARP/RALP). Una por canal vertical objetivo. -->
+            {#each yawTargets as yt (yt)}
+              {@const a = ((yt - YAW_TOL) * Math.PI) / 180}
+              {@const b = ((yt + YAW_TOL) * Math.PI) / 180}
+              <path
+                d={`M 0 0 L ${90 * Math.sin(a)} ${-90 * Math.cos(a)} A 90 90 0 0 1 ${90 * Math.sin(b)} ${-90 * Math.cos(b)} Z`}
+                fill="#22c55e"
+              />
+              <!-- Línea guía del eje del plano (radial desde el centro). -->
+              <line
+                x1="0" y1="0"
+                x2={90 * Math.sin((yt * Math.PI) / 180)}
+                y2={-90 * Math.cos((yt * Math.PI) / 180)}
+                stroke="#15803d" stroke-width="1.5" stroke-dasharray="3 2"
+              />
+            {/each}
+          {/if}
           <!-- Ticks F/I/D (rango ±90°) -->
           {#each [{ a: 0, l: 'F' }, { a: 90, l: 'D' }, { a: -90, l: 'I' }] as t}
             <text x={96 * Math.sin((t.a * Math.PI) / 180)} y={-96 * Math.cos((t.a * Math.PI) / 180) + 3}
@@ -589,6 +689,14 @@
   }
   .pose-tag.ok { background: var(--success); color: white; }
   .pose-tag.warn { background: var(--warn); color: white; }
+
+  .target-chip {
+    font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+    background: var(--primary-soft, rgba(74,158,255,0.15));
+    color: var(--primary, #4a9eff);
+    border: 1px solid var(--primary, #4a9eff);
+    text-transform: none; letter-spacing: 0;
+  }
 
   .axes-btn {
     font-size: 11px; padding: 2px 8px; border-radius: 4px;

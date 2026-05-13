@@ -277,7 +277,10 @@
     <main class="layout">
       <section class="row top">
         <div class="head-card">
-          <HeadLiveView impulseLayout="prominent" />
+          <HeadLiveView
+            impulseLayout="prominent"
+            targetChannel={bundle?.kind === 'practica-vert' ? 'vert-any' : undefined}
+          />
         </div>
         <aside class="side">
           <div class="panel">
@@ -343,8 +346,7 @@
                   <span class="ro-lab">Objetivo actual</span>
                   <b class="big-level">{levelName(current.acceptanceId)}</b>
                   {#if bundle.kind === 'practica-vert'}
-                    <!-- TODO[#13 F0.5]: marca diagonal de pose objetivo en HeadLiveView (LARP/RALP a ±45°). -->
-                    <span class="now-hint">Plano vertical · cabeza girada ~45° (LARP o RALP)</span>
+                    <span class="now-hint">Plano vertical · sigue la marca diagonal en la vista superior (LARP o RALP)</span>
                   {/if}
                 </div>
               {/if}

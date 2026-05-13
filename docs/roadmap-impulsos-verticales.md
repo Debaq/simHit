@@ -118,6 +118,28 @@ Además, las marcas de pose objetivo y las zonas de tolerancia en HeadLiveView n
 
 ---
 
+## Ampliación de alcance (descubierto en revisión post-F4/F5)
+
+El informe clínico (`Report` en `lib/report.svelte.ts`) y la vista `/informe/[id]` solo soportan canales horizontales (`Side = 'LL'|'RL'`, campos `gainLL/RL/countLL/RL`). No hay informe multicanal ni modo examen multicanal. Issue #13 no se cierra hasta resolver al menos F0.5 + F7.
+
+### F7 — Informe clínico con 6 canales
+
+**Archivos:** `app/src/lib/report.svelte.ts`, `app/src/routes/informe/[id]/+page.svelte`, `app/src/routes/informes/+page.svelte`, `app/src/routes/+page.svelte` (flujo clínico).
+
+- Ampliar `Report` a 6 canales: `Record<Channel, { gain: number; count: number }>` o equivalente.
+- `Side` → `ImpulseSide` en `ImpulseSnapshot`.
+- Vista informe: tabla 6 filas, 6 `ImpulsePlotStatic` (uno por canal).
+- `Findings` / `Diagnosis`: ampliar para hipofunción anterior/posterior izq/der (decisión clínica, consultar).
+- **Migración:** mantener compatibilidad. Informes legados (solo LL/RL) se leen con counts verticales en 0. Vista renderiza canales sin datos como "—" o vacíos sin romper.
+
+### F8 — Modo examen multicanal (opcional)
+
+- Bundle clínico "completo 6 canales" con guía progresiva (horizontal → LARP → RALP).
+- UI de transición entre planos durante el examen.
+- Probablemente se desbloquea solo con F7 + F0.5 implementadas.
+
+---
+
 ## Diferido (post-issue #13)
 
 ### F0.5 — HeadLiveView vertical + pose objetivo
