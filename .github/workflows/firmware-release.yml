@@ -123,22 +123,39 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/fw-v')
         uses: softprops/action-gh-release@v2
         with:
-          name: Firmware v${{ steps.ver.outputs.version }}
+          name: 🔌 Firmware v${{ steps.ver.outputs.version }} (ESP32-C3)
           body: |
-            Firmware SimHIT compilado para ESP32-C3 SuperMini.
+            > ⚠️ **Esto es FIRMWARE del dispositivo (microcontrolador ESP32-C3 dentro de la gafa SimHIT), NO es el software de escritorio.**
+            >
+            > Para descargar la aplicación SimHIT (Linux/Windows) buscá los Releases con tag `v2026.*`.
 
-            **Versión:** `${{ steps.ver.outputs.version }}`
-            **Board:** `${{ env.FQBN }}`
-            **SHA-256 del .bin:** `${{ steps.pkg.outputs.sha256 }}`
+            ## Instalación recomendada — desde la app SimHIT
 
-            ### Flasheo manual (mientras espflash llega al módulo de métricas)
+            La forma soportada de instalar este firmware es desde la propia aplicación SimHIT:
+
+            1. Abrí SimHIT y conectá la gafa por USB-C.
+            2. Andá a la pestaña **Métricas → paso 1 (Firmware)**.
+            3. La app detecta automáticamente la versión instalada y compara contra esta release.
+            4. Si hay actualización disponible, presioná **Flashear v${{ steps.ver.outputs.version }}**.
+
+            No necesitás `esptool.py`, terminal ni Arduino IDE.
+
+            ## Detalles técnicos
+
+            - **Versión:** `${{ steps.ver.outputs.version }}`
+            - **Board:** `${{ env.FQBN }}` (ESP32-C3 SuperMini)
+            - **SHA-256 del .bin:** `${{ steps.pkg.outputs.sha256 }}`
+
+            ## Flasheo manual (avanzado / debugging)
+
+            Solo si no podés usar la app, o estás haciendo bring-up de hardware:
 
             ```bash
             esptool.py --chip esp32c3 --port /dev/ttyACM0 --baud 460800 \
               write_flash -z 0x0 ${{ steps.pkg.outputs.base }}.bin
             ```
 
-            O usá `arduino-cli upload` con el `.merged.bin`.
+            El `.merged.bin` incluye bootloader + tabla de particiones; el `.bin` plano va solo en la app.
           files: |
             ${{ steps.pkg.outputs.base }}.bin
             ${{ steps.pkg.outputs.base }}.merged.bin
