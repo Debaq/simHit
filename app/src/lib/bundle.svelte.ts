@@ -2,18 +2,23 @@
 // de cámara. El docente arma escenarios y, al activar uno, el simulador queda
 // configurado con las tres partes a la vez.
 
-import { scenarios } from '$lib/scenario.svelte';
+import { scenarios, CHANNELS, type Channel } from '$lib/scenario.svelte';
 import { acceptance } from '$lib/acceptance.svelte';
 import { eyeset } from '$lib/eyeset.svelte';
 
-export type BundleKind = 'clinico' | 'practica-horiz' | 'practica-vert';
+export type BundleKind = 'clinico' | 'practica-horiz' | 'practica-vert' | 'practica-multi';
 export type PracticeOrder = 'random' | 'sequential';
 export type PracticeMode = 'attempts' | 'hits';
 
-/** Un objetivo de práctica: cuántos impulsos se piden con un preset de aceptación. */
+/** Un objetivo de práctica: cuántos impulsos se piden con un preset de aceptación.
+ *  `targetChannel` (opcional, #13 F8): fija el canal específico que se quiere
+ *  practicar en ese goal. Solo lo usan los bundles `practica-multi` para guiar
+ *  la transición de plano (horizontal → LARP → RALP). Si está indefinido, el
+ *  comportamiento es el legado (cualquier canal del plano de la variant). */
 export interface PracticeGoal {
   acceptanceId: string;
   count: number;
+  targetChannel?: Channel;
 }
 
 export interface Escenario {
@@ -44,7 +49,7 @@ export function defaultGoals(): PracticeGoal[] {
 const LS_LIST = 'simhit:bundles:list';
 const LS_ACTIVE = 'simhit:bundles:active';
 /** Versionado: bumpear cuando se agregan nuevos seeds para que usuarios viejos los vean. */
-const LS_SEEDED = 'simhit:bundles:seeded:v3';
+const LS_SEEDED = 'simhit:bundles:seeded:v4';
 
 // Escenarios de muestra que se siembran la primera vez. El docente puede
 // borrarlos y no vuelven (la flag `seeded` queda persistida).
@@ -102,6 +107,29 @@ function buildStarterBundles(): Escenario[] {
       mode: 'attempts',
       updated: now - 4,
     },
+    {
+      id: 'es_seed_practica_multi',
+      name: '6. Práctica multicanal (6 canales)',
+      kind: 'practica-multi',
+      casoId: '',
+      acceptanceId: 'estandar',
+      eyesetId: '',
+      // Orden anatómico: horizontal → LARP → RALP. Cada goal apunta a un canal
+      // específico para que la guía progresiva pueda anunciar la transición
+      // de plano. El acceptanceId 'estandar' es el preset común; el orden
+      // secuencial asegura que se mantenga la progresión.
+      goals: [
+        { acceptanceId: 'estandar', count: 5, targetChannel: 'LL' },
+        { acceptanceId: 'estandar', count: 5, targetChannel: 'RL' },
+        { acceptanceId: 'estandar', count: 5, targetChannel: 'LA' },
+        { acceptanceId: 'estandar', count: 5, targetChannel: 'RP' },
+        { acceptanceId: 'estandar', count: 5, targetChannel: 'RA' },
+        { acceptanceId: 'estandar', count: 5, targetChannel: 'LP' },
+      ],
+      order: 'sequential',
+      mode: 'attempts',
+      updated: now - 5,
+    },
   ];
 }
 
@@ -142,6 +170,16 @@ function migrateBundle(raw: any): Escenario {
       }
     }
     goals = arr;
+  }
+  // Conservar targetChannel si está presente (solo valores válidos del enum).
+  if (Array.isArray(goals)) {
+    goals = goals.map((g: any) => {
+      const out: PracticeGoal = { acceptanceId: g.acceptanceId, count: g.count };
+      if (typeof g.targetChannel === 'string' && (CHANNELS as readonly string[]).includes(g.targetChannel)) {
+        out.targetChannel = g.targetChannel as Channel;
+      }
+      return out;
+    });
   }
   return {
     id: raw.id,
