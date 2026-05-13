@@ -1081,8 +1081,6 @@
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   @media (max-width: 760px) { .grid-2 { grid-template-columns: 1fr; } }
 
-  /* Flash */
-  .flash-card { min-height: 200px; display: flex; flex-direction: column; }
   .empty {
     flex: 1;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -1092,27 +1090,10 @@
   .empty-ic { font-size: 42px; opacity: .6; }
   .empty-t { font-size: 15px; font-weight: 600; color: var(--text); }
   .empty-d { color: var(--text-muted); font-size: 13px; margin: 0 0 8px; }
-  .dev-row {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
-    margin-bottom: 16px;
-  }
-  .dev-cell {
-    background: var(--surface-2);
-    border-radius: var(--radius-sm);
-    padding: 10px 12px;
-  }
-  .dev-cell span {
-    display: block;
-    font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
-    color: var(--text-muted); margin-bottom: 2px;
-  }
-  .dev-cell b { font-family: ui-monospace, monospace; font-size: 13px; font-weight: 600; }
-  .dev-cell b.muted { color: var(--text-muted); font-weight: 400; font-style: italic; }
   .actions-row {
     display: flex; gap: 8px; flex-wrap: wrap;
   }
   .actions-row.right { justify-content: flex-end; }
-  .flash-prog { margin-top: 8px; }
   .bar {
     height: 10px;
     background: var(--surface-2);
@@ -1124,11 +1105,6 @@
     height: 100%;
     background: var(--primary);
     transition: width .15s ease-out;
-  }
-  .bar-lab {
-    font-size: 12px; color: var(--text-muted);
-    margin-top: 6px; text-align: center;
-    font-family: ui-monospace, monospace;
   }
   .ok-msg {
     display: flex; align-items: center; gap: 10px;
@@ -1260,7 +1236,6 @@
     color: var(--text-muted); font-weight: 700;
     margin-bottom: 6px;
   }
-  .ro-val { font-size: 18px; font-family: ui-monospace, monospace; font-weight: 600; }
 
   /* Verdict */
   .verdict-card.pass {
