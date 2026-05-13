@@ -190,17 +190,44 @@
     return `${m}:${String(r).padStart(2, '0')}`;
   }
 
-  function exportJson() {
-    const profile = {
+  // ─────────── Referencia de sensores (literatura / datasheets) ───────────
+  // Valores típicos para comparar el resultado contra rangos publicados.
+  // No reemplaza datasets reales: es solo guía visual para detectar resultados
+  // anómalos vs lo esperado para el sensor identificado.
+  type SensorReference = {
+    label: string;
+    source: string;
+    arw_deg_sqrt_hr: number;
+    bias_instability_deg_hr: number;
+    range_dps: number;
+  };
+  const SENSOR_REFERENCES: Record<string, SensorReference> = {
+    'ICM-42688': { label: 'ICM-42688-P', source: 'TDK InvenSense datasheet rev 1.6',
+                    arw_deg_sqrt_hr: 0.30, bias_instability_deg_hr: 24, range_dps: 2000 },
+    'BNO055':    { label: 'BNO055',       source: 'Bosch datasheet rev 1.4',
+                    arw_deg_sqrt_hr: 0.55, bias_instability_deg_hr: 40, range_dps: 2000 },
+    'MPU9250':   { label: 'MPU-9250',     source: 'InvenSense datasheet rev 1.1',
+                    arw_deg_sqrt_hr: 0.45, bias_instability_deg_hr: 35, range_dps: 2000 },
+    'L3GD20H':   { label: 'L3GD20H',      source: 'STMicro datasheet rev 2',
+                    arw_deg_sqrt_hr: 0.50, bias_instability_deg_hr: 50, range_dps: 2000 },
+  };
+  let showReference = $state(false);
+  let referenceData = $derived(detectedSensor ? SENSOR_REFERENCES[detectedSensor.label] ?? null : null);
+
+  function buildProfile() {
+    return {
       schema_version: 'simhit-profile-1.0',
+      generated_by: { app: 'SimHIT', version: '2026.5.0' },
       generated_at_utc: new Date().toISOString(),
       sensor: detectedSensor,
       firmware: firmwareInfo,
+      acceptance_preset: { id: acceptance.active.id, name: acceptance.active.name },
       session: {
         id: capture.sessionId,
         csv_path: capture.csvPath,
         csv_sha256: capture.summary?.csv_sha256,
         duration_s: capture.summary?.duration_s,
+        samples_written: capture.summary?.samples_written,
       },
       metrics: {
         sampling: analysis.sampling,
@@ -208,14 +235,86 @@
         synthetic: synthetic.result,
       },
       verdict,
+      reference: referenceData,
     };
-    const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `sensor_profile_${Date.now()}.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 500);
+  }
+
+  let exportError = $state<string | null>(null);
+  let exporting = $state<'none' | 'json' | 'pdf'>('none');
+
+  async function exportJson() {
+    exportError = null;
+    exporting = 'json';
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const { invoke } = await import('@tauri-apps/api/core');
+      const defaultName = `sensor_profile_${detectedSensor?.label ?? 'unknown'}_${new Date().toISOString().slice(0, 10)}.json`;
+      const target = await save({
+        defaultPath: defaultName,
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (!target) { exporting = 'none'; return; }
+      const text = JSON.stringify(buildProfile(), null, 2);
+      const bytes = new TextEncoder().encode(text);
+      await invoke('save_pdf', { path: target, bytes: Array.from(bytes) });
+    } catch (e) {
+      exportError = String(e);
+    } finally {
+      exporting = 'none';
+    }
+  }
+
+  async function exportPdf() {
+    exportError = null;
+    exporting = 'pdf';
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const { invoke } = await import('@tauri-apps/api/core');
+      const html2pdfMod = await import('html2pdf.js');
+      const html2pdf = html2pdfMod.default ?? html2pdfMod;
+
+      const defaultName = `sensor_profile_${detectedSensor?.label ?? 'unknown'}_${new Date().toISOString().slice(0, 10)}.pdf`;
+      const target = await save({
+        defaultPath: defaultName,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      });
+      if (!target) { exporting = 'none'; return; }
+
+      const article = document.querySelector('article.profile-export') as HTMLElement | null;
+      if (!article) throw new Error('No se encontró el bloque exportable');
+
+      document.body.classList.add('is-exporting');
+      try {
+        const blob: Blob = await html2pdf()
+          .from(article)
+          .set({
+            margin: [14, 14, 14, 14],
+            filename: defaultName,
+            image: { type: 'jpeg', quality: 0.96 },
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            pagebreak: { mode: ['css', 'legacy'] },
+          })
+          .outputPdf('blob');
+        const buf = new Uint8Array(await blob.arrayBuffer());
+        await invoke('save_pdf', { path: target, bytes: Array.from(buf) });
+      } finally {
+        document.body.classList.remove('is-exporting');
+      }
+    } catch (e) {
+      exportError = String(e);
+    } finally {
+      exporting = 'none';
+    }
+  }
+
+  // Compara una métrica medida contra el rango "esperado" de la referencia:
+  // ratio = medido / referencia. ratio≈1 → coherente, ratio>>1 → peor del esperado.
+  function refRatio(measured: number | undefined | null, reference: number): { ratio: number; status: 'ok' | 'warn' | 'bad' } {
+    if (measured == null || !isFinite(measured) || reference === 0) return { ratio: NaN, status: 'warn' };
+    const r = measured / reference;
+    const status = r <= 1.5 ? 'ok' : r <= 3.0 ? 'warn' : 'bad';
+    return { ratio: r, status };
   }
 </script>
 
@@ -678,8 +777,21 @@
       <section class="panel">
         <header class="panel-h">
           <h2>Perfil del sensor</h2>
-          <p class="lead">Veredicto consolidado y artefacto JSON con hashes verificables.</p>
+          <p class="lead">Veredicto consolidado y artefacto exportable con hashes verificables.</p>
         </header>
+
+        <article class="profile-export">
+          <div class="export-head">
+            <div>
+              <div class="export-tag">SimHIT — Perfil de caracterización del sensor</div>
+              <div class="export-title">{detectedSensor?.label ?? '(sin sensor)'} · {new Date().toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' })}</div>
+            </div>
+            <div class="export-meta">
+              <div><span>Preset</span><b>{acceptance.active.name}</b></div>
+              <div><span>Firmware</span><b>v{firmwareInfo.version}</b></div>
+              <div><span>Sesión</span><b class="mono-short">{capture.sessionId?.slice(0, 8) ?? '—'}</b></div>
+            </div>
+          </div>
 
         <div class="card verdict-card" class:pass={verdict.overall === 'Pass'} class:fail={verdict.overall === 'Fail'} class:marginal={verdict.overall === 'Marginal'}>
           <div class="verdict-head">
@@ -718,19 +830,97 @@
           {/if}
         </div>
 
-        <div class="card">
+        {#if analysis.allan && analysis.sampling}
+          <div class="card">
+            <div class="card-h">Métricas medidas (resumen)</div>
+            <div class="grid-2">
+              <dl class="kv">
+                <dt>Frecuencia efectiva</dt><dd><b>{analysis.sampling.measured_hz.toFixed(2)} Hz</b></dd>
+                <dt>Δt σ (jitter)</dt><dd>{analysis.sampling.stdev_dt_us.toFixed(2)} µs</dd>
+                <dt>Muestras escritas</dt><dd>{analysis.sampling.n_samples.toLocaleString()}</dd>
+                <dt>Muestras perdidas</dt><dd>{analysis.sampling.samples_lost_estimate}</dd>
+              </dl>
+              <dl class="kv">
+                <dt>ARW máx (3 ejes)</dt><dd><b>{Math.max(...analysis.allan.arw_deg_sqrt_hr).toFixed(3)} °/√h</b></dd>
+                <dt>BI máx (3 ejes)</dt><dd>{Math.max(...analysis.allan.bias_instability_deg_hr).toFixed(1)} °/h</dd>
+                <dt>Duración análisis</dt><dd>{analysis.allan.duration_s.toFixed(1)} s</dd>
+                <dt>Fs análisis</dt><dd>{analysis.allan.sample_rate_hz.toFixed(2)} Hz</dd>
+              </dl>
+            </div>
+            {#if capture.summary}
+              <p class="note inline" style="margin-top:10px">
+                CSV: <code class="mono-short">{capture.csvPath}</code><br>
+                SHA-256: <code class="mono-short" style="word-break:break-all">{capture.summary.csv_sha256}</code>
+              </p>
+            {/if}
+          </div>
+        {/if}
+
+        {#if showReference && referenceData && analysis.allan && analysis.sampling}
+          {@const a = analysis.allan}
+          {@const arwMax = Math.max(...a.arw_deg_sqrt_hr)}
+          {@const biMax = Math.max(...a.bias_instability_deg_hr)}
+          {@const rArw = refRatio(arwMax, referenceData.arw_deg_sqrt_hr)}
+          {@const rBi = refRatio(biMax, referenceData.bias_instability_deg_hr)}
+          <div class="card">
+            <div class="card-h">Comparación con referencia · {referenceData.label}</div>
+            <table class="tbl">
+              <thead>
+                <tr><th>Métrica</th><th>Medido</th><th>Referencia</th><th>Ratio</th><th></th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>ARW (°/√h)</td>
+                  <td>{arwMax.toFixed(3)}</td>
+                  <td>{referenceData.arw_deg_sqrt_hr.toFixed(2)}</td>
+                  <td><b>{isFinite(rArw.ratio) ? rArw.ratio.toFixed(2) + '×' : '—'}</b></td>
+                  <td><span class="badge {rArw.status === 'ok' ? 'ok' : rArw.status === 'warn' ? 'warn-b' : 'bad'}">
+                    {rArw.status === 'ok' ? 'Coherente' : rArw.status === 'warn' ? 'Elevado' : 'Anómalo'}
+                  </span></td>
+                </tr>
+                <tr>
+                  <td>Bias instability (°/h)</td>
+                  <td>{biMax.toFixed(1)}</td>
+                  <td>{referenceData.bias_instability_deg_hr.toFixed(0)}</td>
+                  <td><b>{isFinite(rBi.ratio) ? rBi.ratio.toFixed(2) + '×' : '—'}</b></td>
+                  <td><span class="badge {rBi.status === 'ok' ? 'ok' : rBi.status === 'warn' ? 'warn-b' : 'bad'}">
+                    {rBi.status === 'ok' ? 'Coherente' : rBi.status === 'warn' ? 'Elevado' : 'Anómalo'}
+                  </span></td>
+                </tr>
+                <tr>
+                  <td>Rango dinámico (°/s)</td>
+                  <td>—</td>
+                  <td>{referenceData.range_dps}</td>
+                  <td>—</td>
+                  <td><span class="badge muted">Configurable</span></td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="note inline">Fuente: <i>{referenceData.source}</i>. Ratio ≤ 1.5× = coherente con datasheet; &gt; 3× sugiere problema de montaje, vibración o configuración.</p>
+          </div>
+        {/if}
+        </article>
+
+        <div class="card no-export">
           <div class="card-h">Exportar</div>
           <div class="actions-row">
-            <button class="primary" onclick={exportJson}>📄 Exportar sensor_profile.json</button>
-            <button disabled title="Pendiente">📕 Exportar PDF</button>
-            <button disabled title="Pendiente">📊 Comparar con referencia</button>
+            <button class="primary" onclick={exportJson} disabled={exporting !== 'none' || !analysis.allan}>
+              {exporting === 'json' ? 'Guardando…' : '📄 sensor_profile.json'}
+            </button>
+            <button onclick={exportPdf} disabled={exporting !== 'none' || !analysis.allan}>
+              {exporting === 'pdf' ? 'Generando PDF…' : '📕 Exportar PDF'}
+            </button>
+            <button onclick={() => (showReference = !showReference)} disabled={!referenceData}>
+              📊 {showReference ? 'Ocultar' : 'Mostrar'} referencia
+            </button>
           </div>
           <p class="note inline">
-            schema: <code>simhit-profile-1.0</code>. Incluye SHA-256 del CSV original y metadatos del firmware.
+            schema: <code>simhit-profile-1.0</code>. Incluye SHA-256 del CSV, configuración de firmware, sensor, preset clínico, y todas las métricas calculadas.
           </p>
+          {#if exportError}<div class="err-inline">{exportError}</div>{/if}
         </div>
 
-        <div class="actions-row right">
+        <div class="actions-row right no-export">
           <button onclick={() => (step = 'flash')}>↺ Empezar de nuevo</button>
         </div>
       </section>
@@ -1097,4 +1287,40 @@
   .verdict-badge.bad { background: var(--danger); }
   .verdict-badge.warn { background: var(--primary); }
   .verdict-badge.pending { background: var(--text-muted); }
+
+  /* Bloque exportable a PDF */
+  .profile-export {
+    display: flex; flex-direction: column; gap: 16px;
+    background: transparent;
+  }
+  .export-head {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    gap: 16px; padding-bottom: 10px;
+    border-bottom: 2px solid var(--primary);
+  }
+  .export-tag {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--primary); font-weight: 700;
+  }
+  .export-title {
+    font-size: 20px; font-weight: 700; color: var(--text); margin-top: 4px;
+  }
+  .export-meta {
+    display: flex; gap: 16px;
+  }
+  .export-meta > div {
+    text-align: right;
+  }
+  .export-meta span {
+    display: block; font-size: 10px; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--text-muted);
+  }
+  .export-meta b { font-size: 12px; font-family: ui-monospace, monospace; }
+
+  /* Modo exportación: oculta UI auxiliar para que html2pdf solo capture el artículo */
+  :global(body.is-exporting) .no-export { display: none !important; }
+  :global(body.is-exporting) .profile-export {
+    background: white;
+    padding: 8px;
+  }
 </style>
