@@ -24,6 +24,18 @@ function crc16Ccitt(s: string): number {
 
 export type FirmwareVersion = 'legacy' | 'extended' | 'unknown';
 
+// Sensor identificado por el firmware en el banner de boot. addr y whoami son
+// strings hex (p.ej. '0x6B', '0xD7') tal como el firmware los emite, para que
+// la UI los muestre sin reformatear. `family` clasifica para tablas y
+// comparaciones contra referencias (datasheets) en el módulo de métricas.
+export type DetectedSensor = {
+  addr: string;
+  whoami: string;
+  name: string;
+  family: 'L3G4200D' | 'L3GD20' | 'L3GD20H' | 'ICM-42688' | 'MPU9250' | 'BNO055' | 'unknown';
+  raw: string;
+};
+
 // Muestra cruda emitida en cada parseLine() exitoso. Sin mapeo de ejes:
 // los componentes son los del sensor físico tal como los provee el firmware.
 export type RawSample = {
@@ -109,6 +121,9 @@ class SerialStore {
   // Diagnostico
   crcErrors = $state(0);
   firmwareVersion = $state<FirmwareVersion>('unknown');
+  // Sensor giroscopio detectado por el firmware en el banner de boot.
+  // Null hasta que se reciba la primera línea "Gyro WHO_AM_I ...".
+  detectedSensor = $state<DetectedSensor | null>(null);
   // Cola de muestras gyro desde el último drenado por simulator. Evita
   // pérdidas por bursts USB y jitter del setInterval del tick.
   private gyroQueue: Array<{ x: number; y: number; z: number }> = [];
@@ -291,6 +306,7 @@ class SerialStore {
     this.calibrated = false;
     this.firmwareVersion = 'unknown';
     this.crcErrors = 0;
+    this.detectedSensor = null;
     try {
       this.sp = new SerialPort({ path, baudRate: FIRMWARE_BAUD });
       await this.sp.open();
@@ -325,6 +341,7 @@ class SerialStore {
     this.portPath = null;
     this.buffer = '';
     this.calibrated = false;
+    this.detectedSensor = null;
   }
 
   async sendCommand(cmd: string) {
@@ -376,8 +393,34 @@ class SerialStore {
       this.bootResolve?.();
       return;
     }
+    // Banner del firmware: "Gyro WHO_AM_I @0x6B = 0xD7 (L3GD20H)".
+    // Capturamos el primer match válido (descarta candidatos sin respuesta).
+    if (line.startsWith('Gyro WHO_AM_I')) {
+      const m = line.match(/@0x([0-9A-Fa-f]{1,2})\s*=\s*0x([0-9A-Fa-f]{1,2})\s*\(([^)]+)\)/);
+      if (m) {
+        const name = m[3].trim();
+        const family: DetectedSensor['family'] =
+          name.includes('L3GD20H')  ? 'L3GD20H'  :
+          name.includes('L3GD20')   ? 'L3GD20'   :
+          name.includes('L3G4200D') ? 'L3G4200D' :
+          name.includes('ICM-42688')? 'ICM-42688':
+          name.includes('MPU9250')  ? 'MPU9250'  :
+          name.includes('BNO055')   ? 'BNO055'   : 'unknown';
+        // Solo registrar identificaciones reconocidas (descarta "desconocido").
+        if (family !== 'unknown') {
+          this.detectedSensor = {
+            addr: '0x' + m[1].toUpperCase(),
+            whoami: '0x' + m[2].toUpperCase(),
+            name,
+            family,
+            raw: line,
+          };
+        }
+      }
+      return;
+    }
     if (line.startsWith('SimHit') || line.startsWith('No ') || line.startsWith('Init') ||
-        line.startsWith('Gyro WHO') || line.startsWith('Mag cal') ||
+        line.startsWith('Mag cal') ||
         line.startsWith('Accel filter') ||
         line.startsWith('IMU STATUS') || line.startsWith('MAG STATUS') ||
         line.startsWith('IMU CLR') || line.startsWith('MAG CLR') || line === 'HELLO') {

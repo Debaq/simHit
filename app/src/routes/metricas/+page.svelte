@@ -39,26 +39,48 @@
     }, 120);
   }
 
-  // 2) Detect sensor
-  const SENSOR_CATALOG = [
-    { label: 'ICM-42688', addr: '0x68', whoami: '0x47', mag: false },
-    { label: 'BNO055', addr: '0x28', whoami: '0xA0', mag: true },
-    { label: 'MPU9250', addr: '0x68', whoami: '0x71', mag: true },
-    { label: 'L3GD20H', addr: '0x6A', whoami: '0xD7', mag: false },
+  // 2) Identificación del sensor. Datos reales provenientes del banner que
+  // el firmware emite en el boot ("Gyro WHO_AM_I @0xXX = 0xYY (Nombre)"),
+  // capturado por serial.svelte.ts en serial.detectedSensor.
+  type CatalogEntry = { label: string; addr: string; whoami: string; mag: boolean };
+  const SENSOR_CATALOG: CatalogEntry[] = [
+    { label: 'L3GD20H',  addr: '0x6A/0x6B', whoami: '0xD7', mag: false },
+    { label: 'L3GD20',   addr: '0x6A/0x6B', whoami: '0xD4', mag: false },
+    { label: 'L3G4200D', addr: '0x69',      whoami: '0xD3', mag: false },
+    { label: 'ICM-42688', addr: '0x68/0x69', whoami: '0x47', mag: false },
+    { label: 'MPU9250',  addr: '0x68/0x69', whoami: '0x71', mag: true },
+    { label: 'BNO055',   addr: '0x28/0x29', whoami: '0xA0', mag: true },
   ];
-  let detectedSensor = $state<typeof SENSOR_CATALOG[number] | null>(null);
-  let firmwareInfo = $state({ version: '1.2.0', git: 'abc123d', sample_rate: 200 });
-
-  function mockSensorDetect() {
-    detectedSensor = SENSOR_CATALOG[0];
-  }
+  // Vista equivalente del sensor detectado, mapeada al catálogo para
+  // resaltar la fila correspondiente y para alimentar el resto del flujo.
+  let detectedSensor = $derived.by<CatalogEntry | null>(() => {
+    const ds = serial.detectedSensor;
+    if (!ds) return null;
+    const match = SENSOR_CATALOG.find((c) => c.label === ds.family) ?? null;
+    return match ?? { label: ds.name, addr: ds.addr, whoami: ds.whoami, mag: false };
+  });
+  // Info del firmware: tomamos lo que el serial detectó. Versión y git_commit
+  // aún no los emite el firmware actual; placeholder hasta que se agreguen.
+  let firmwareInfo = $derived({
+    version: serial.firmwareVersion === 'extended' ? '1.2.0' : '1.0.0',
+    git: serial.firmwareVersion === 'extended' ? 'extended' : 'legacy',
+    sample_rate: 200,
+  });
 
   // 3) Capture — config UI. Los valores se pasan al store al iniciar.
+  // El sensor por defecto se sincroniza con el detectado en serial.
   let captureCfg = $state({
     durationMin: 30,
     preheatMin: 15,
     ambientTempC: 24.8,
-    sensorLabel: 'ICM-42688',
+    sensorLabel: 'L3GD20H',
+  });
+
+  // Sincroniza la etiqueta del sensor con la detección del firmware.
+  $effect(() => {
+    if (detectedSensor && captureCfg.sensorLabel !== detectedSensor.label) {
+      captureCfg.sensorLabel = detectedSensor.label;
+    }
   });
   let captureErrorMsg = $state<string | null>(null);
 
@@ -399,29 +421,52 @@
       <section class="panel">
         <header class="panel-h">
           <h2>Identificación del sensor</h2>
-          <p class="lead">El firmware ejecuta <code>i2c_scan()</code> y discrimina por dirección + WHO_AM_I.</p>
+          <p class="lead">El firmware emite el WHO_AM_I del giroscopio en el banner de boot. La identificación es automática al conectar.</p>
         </header>
+
+        {#if !serial.connected}
+          <div class="warn-msg">
+            <span class="warn-ic">!</span>
+            <div>
+              <b>SimHIT no está conectado.</b>
+              <div>Conéctelo desde la barra superior — el sensor se identifica automáticamente al iniciar la sesión.</div>
+            </div>
+          </div>
+        {/if}
 
         <div class="grid-2">
           <div class="card">
             <div class="card-h">Sensor detectado</div>
-            {#if detectedSensor}
+            {#if serial.detectedSensor && detectedSensor}
               <div class="sensor-info">
-                <div class="sensor-name">{detectedSensor.label}</div>
+                <div class="sensor-name">{serial.detectedSensor.name}</div>
                 <dl class="kv">
-                  <dt>Dirección I²C</dt><dd><code>{detectedSensor.addr}</code></dd>
-                  <dt>WHO_AM_I</dt><dd><code>{detectedSensor.whoami}</code></dd>
+                  <dt>Dirección I²C</dt><dd><code>{serial.detectedSensor.addr}</code></dd>
+                  <dt>WHO_AM_I</dt><dd><code>{serial.detectedSensor.whoami}</code></dd>
+                  <dt>Familia</dt><dd>{serial.detectedSensor.family}</dd>
                   <dt>Magnetómetro</dt><dd>{detectedSensor.mag ? 'Sí' : 'No'}</dd>
-                  <dt>Firmware</dt><dd>v{firmwareInfo.version} ({firmwareInfo.git})</dd>
+                  <dt>Firmware</dt><dd>{serial.firmwareVersion} ({firmwareInfo.git})</dd>
                   <dt>Sample rate</dt><dd>{firmwareInfo.sample_rate} Hz</dd>
+                  {#if serial.calibrated}
+                    <dt>Calibración</dt><dd style="color:var(--success)">✓ Aplicada</dd>
+                  {:else}
+                    <dt>Calibración</dt><dd style="color:var(--text-muted)">Pendiente</dd>
+                  {/if}
                 </dl>
                 <button class="primary block" onclick={() => (step = 'capture')}>
                   Continuar a captura →
                 </button>
               </div>
+            {:else if serial.connected}
+              <div class="empty small">
+                <div class="empty-ic">📡</div>
+                <div class="empty-t">Esperando handshake…</div>
+                <p class="empty-d">El firmware identifica el sensor durante el boot. Si no aparece, reinicie SimHIT (desconectar/conectar el USB).</p>
+              </div>
             {:else}
               <div class="empty small">
-                <button class="primary" onclick={mockSensorDetect}>Ejecutar handshake</button>
+                <div class="empty-ic">🔌</div>
+                <p class="empty-d">Conecte SimHIT para iniciar la identificación.</p>
               </div>
             {/if}
           </div>
@@ -443,6 +488,7 @@
                 {/each}
               </tbody>
             </table>
+            <p class="note inline">El firmware actual escanea solo la familia L3G (0x69/0x6A/0x6B). Soporte multi-sensor (ICM/MPU/BNO) está en el roadmap.</p>
           </div>
         </div>
       </section>
