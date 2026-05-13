@@ -1,0 +1,149 @@
+name: Firmware Release
+
+# Dispara con tags fw-v* (p.ej. fw-v1.0.0) o manualmente.
+# Compila firmware/simhit/simhit.ino para ESP32-C3 con arduino-cli,
+# adjunta el .bin (más un .sha256 y el .elf con símbolos de debug) al Release.
+on:
+  push:
+    tags:
+      - 'fw-v*'
+  workflow_dispatch:
+    inputs:
+      version_override:
+        description: 'Versión a estampar (sin el prefijo fw-v). Opcional.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Compilar firmware para ESP32-C3
+    runs-on: ubuntu-22.04
+
+    env:
+      # FQBN del core esp32 de Espressif. Si se cambia el board (S3, C6),
+      # ajustar acá y verificar pines I2C/LASER en simhit.ino.
+      FQBN: esp32:esp32:XIAO_ESP32C3
+      CORE_INDEX: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derivar versión
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            v="${GITHUB_REF_NAME#fw-v}"
+          else
+            v="${{ inputs.version_override }}"
+            [[ -z "$v" ]] && v="dev-$(date +%Y%m%d-%H%M%S)"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Compilando versión: $v"
+
+      - name: Verificar coherencia con FW_VERSION_STRING
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          fw=$(grep -oP '#define FW_VERSION_STRING "\K[^"]+' firmware/simhit/simhit.ino || true)
+          if [[ "$v" != "$fw" ]]; then
+            echo "::error::tag $v no coincide con FW_VERSION_STRING $fw en simhit.ino"
+            exit 1
+          fi
+
+      - name: Instalar arduino-cli
+        shell: bash
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR="$HOME/bin" sh
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Configurar core ESP32 + instalar
+        shell: bash
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls "$CORE_INDEX"
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+
+      - name: Instalar librerías Adafruit
+        shell: bash
+        run: |
+          arduino-cli lib install \
+            "Adafruit Unified Sensor" \
+            "Adafruit LSM303 Accel" \
+            "Adafruit LSM303DLH Mag" \
+            "Adafruit AHRS"
+
+      - name: Compilar
+        shell: bash
+        run: |
+          mkdir -p firmware/build
+          arduino-cli compile \
+            --fqbn "$FQBN" \
+            --output-dir firmware/build \
+            --warnings none \
+            firmware/simhit
+
+      - name: Empaquetar artefactos
+        id: pkg
+        shell: bash
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          base="simhit-fw-${v}-esp32c3"
+          cd firmware/build
+          # arduino-cli produce simhit.ino.bin / .elf / .merged.bin
+          cp simhit.ino.bin "../../${base}.bin"
+          cp simhit.ino.elf "../../${base}.elf" 2>/dev/null || true
+          if [[ -f simhit.ino.merged.bin ]]; then
+            cp simhit.ino.merged.bin "../../${base}.merged.bin"
+          fi
+          cd ../..
+          sha256sum "${base}.bin" > "${base}.sha256"
+          ls -la "${base}".*
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(awk '{print $1}' ${base}.sha256)" >> "$GITHUB_OUTPUT"
+
+      - name: Subir artifact (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.base }}
+          path: |
+            ${{ steps.pkg.outputs.base }}.bin
+            ${{ steps.pkg.outputs.base }}.merged.bin
+            ${{ steps.pkg.outputs.base }}.elf
+            ${{ steps.pkg.outputs.base }}.sha256
+
+      - name: Crear/actualizar Release
+        if: startsWith(github.ref, 'refs/tags/fw-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Firmware v${{ steps.ver.outputs.version }}
+          body: |
+            Firmware SimHIT compilado para ESP32-C3 SuperMini.
+
+            **Versión:** `${{ steps.ver.outputs.version }}`
+            **Board:** `${{ env.FQBN }}`
+            **SHA-256 del .bin:** `${{ steps.pkg.outputs.sha256 }}`
+
+            ### Flasheo manual (mientras espflash llega al módulo de métricas)
+
+            ```bash
+            esptool.py --chip esp32c3 --port /dev/ttyACM0 --baud 460800 \
+              write_flash -z 0x0 ${{ steps.pkg.outputs.base }}.bin
+            ```
+
+            O usá `arduino-cli upload` con el `.merged.bin`.
+          files: |
+            ${{ steps.pkg.outputs.base }}.bin
+            ${{ steps.pkg.outputs.base }}.merged.bin
+            ${{ steps.pkg.outputs.base }}.elf
+            ${{ steps.pkg.outputs.base }}.sha256
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
