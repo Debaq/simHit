@@ -45,12 +45,20 @@
   let magProgress = $state<{ sec: number; oct: number; n: number }>({ sec: 0, oct: 0, n: 0 });
 
   onMount(() => {
-    serial.listPorts();
+    // Sondear puertos disponibles enviando HELLO para detectar SimHIT.
+    // No bloquea el render: la promesa corre en background.
+    void serial.refreshAndAutoSelect().then(() => {
+      // Si el sondeo autoseleccionó un puerto, reflejarlo en el dropdown.
+      if (serial.portPath && !selectedPort) selectedPort = serial.portPath;
+      else if (!selectedPort && serial.ports.length) selectedPort = serial.ports[0];
+    });
   });
 
   async function refreshPorts() {
-    await serial.listPorts();
-    if (!selectedPort && serial.ports.length) selectedPort = serial.ports[0];
+    await serial.refreshAndAutoSelect();
+    if (serial.portPath) selectedPort = serial.portPath;
+    else if (!selectedPort && serial.ports.length) selectedPort = serial.ports[0];
+    else if (selectedPort && !serial.ports.includes(selectedPort)) selectedPort = '';
   }
 
   async function toggleSerial() {
@@ -239,16 +247,33 @@
     {/if}
 
     <div class="serial">
-      <select bind:value={selectedPort} disabled={serial.connected || serial.ports.length === 0} title="Puerto serie">
-        {#if serial.ports.length === 0}
-          <option value="">— sin puertos —</option>
+      <select
+        bind:value={selectedPort}
+        disabled={serial.connected || serial.probing || serial.ports.length === 0}
+        title={serial.probing
+          ? 'Buscando SimHIT…'
+          : serial.ports.length === 0
+            ? 'No se encontró SimHIT. Verifique la conexión USB y presione refresh.'
+            : 'Puerto SimHIT detectado'}
+      >
+        {#if serial.probing}
+          <option value="">Buscando SimHIT…</option>
+        {:else if serial.ports.length === 0}
+          <option value="">— SimHIT no detectado —</option>
         {:else}
           {#each serial.ports as p}
             <option value={p}>{p}</option>
           {/each}
         {/if}
       </select>
-      <button class="icon-btn" onclick={refreshPorts} title="Actualizar puertos" disabled={serial.connected}>↻</button>
+      <button
+        class="icon-btn"
+        onclick={refreshPorts}
+        title="Buscar SimHIT"
+        disabled={serial.connected || serial.probing}
+      >
+        {serial.probing ? '…' : '↻'}
+      </button>
       <button
         class="primary"
         onclick={toggleSerial}
