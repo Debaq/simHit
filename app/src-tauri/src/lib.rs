@@ -27,6 +27,8 @@ pub fn run() {
             metrics::capture::stop_capture,
             metrics::sampling::analyze_sampling,
             metrics::allan::analyze_allan_variance,
+            metrics::flash::detect_esp_chip,
+            metrics::flash::flash_firmware,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

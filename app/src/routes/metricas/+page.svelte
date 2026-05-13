@@ -6,6 +6,7 @@
   import { synthetic } from '$lib/synthetic.svelte';
   import { acceptance } from '$lib/acceptance.svelte';
   import { firmware } from '$lib/firmware.svelte';
+  import { flash } from '$lib/flash.svelte';
   import { onMount } from 'svelte';
 
   // Vista de Métricas / Caracterización. La sección "Captura" usa el módulo
@@ -425,11 +426,47 @@
                 {#if m.notes}<p class="note inline" style="margin-top:8px">{m.notes}</p>{/if}
               </div>
               <div class="actions-row" style="margin-top:10px">
-                <button onclick={() => firmware.check(true)}>↻ Refrescar manifest</button>
-                {#if firmware.status === 'update-available'}
-                  <button class="primary" disabled title="Flasheo automático llegará con espflash">⬇ Flashear v{m.version}</button>
+                <button onclick={() => firmware.check(true)} disabled={flash.stage !== 'idle' && flash.stage !== 'done' && flash.stage !== 'error'}>↻ Refrescar manifest</button>
+                {#if firmware.status === 'update-available' || firmware.status === 'newer-than-remote'}
+                  <button
+                    class="primary"
+                    onclick={() => flash.start()}
+                    disabled={!serial.portPath || (flash.stage !== 'idle' && flash.stage !== 'done' && flash.stage !== 'error')}
+                  >
+                    ⬇ Flashear v{m.version}
+                  </button>
                 {/if}
               </div>
+
+              {#if flash.stage !== 'idle'}
+                {@const f = flash}
+                {@const pct = f.progress >= 0 ? Math.round(f.progress * 100) : null}
+                <div class="flash-progress" style="margin-top:14px">
+                  <div class="flash-stage">
+                    {#if f.stage === 'downloading'}📥 Descargando firmware
+                    {:else if f.stage === 'verifying'}🔐 Verificando SHA-256
+                    {:else if f.stage === 'connecting'}📡 Conectando al ESP
+                    {:else if f.stage === 'writing'}✍ Escribiendo flash
+                    {:else if f.stage === 'resetting'}⟳ Reiniciando dispositivo
+                    {:else if f.stage === 'done'}✓ Firmware actualizado
+                    {:else if f.stage === 'error'}✗ Error
+                    {/if}
+                  </div>
+                  {#if pct !== null}
+                    <div class="bar"><div class="bar-fill" style:width="{pct}%"></div></div>
+                    <div class="flash-pct">{pct}% · {(f.downloadedBytes / 1024).toFixed(0)} / {(f.totalBytes / 1024).toFixed(0)} KiB</div>
+                  {:else}
+                    <div class="bar"><div class="bar-fill indet"></div></div>
+                  {/if}
+                  {#if f.message}<div class="flash-msg">{f.message}</div>{/if}
+                  {#if f.error}<div class="err-inline">{f.error}</div>{/if}
+                  {#if f.stage === 'done' || f.stage === 'error'}
+                    <div class="actions-row" style="margin-top:8px">
+                      <button onclick={() => flash.reset()}>Cerrar</button>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
             {/if}
           </div>
         </div>
@@ -1365,6 +1402,35 @@
   .update-box.up    .update-h .ic { background: var(--success); }
   .update-box.avail .update-h .ic { background: var(--primary); }
   .update-box.dev   .update-h .ic { background: var(--accent); }
+
+  .flash-progress {
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+  }
+  .flash-stage {
+    font-size: 13px; font-weight: 600;
+    margin-bottom: 8px; color: var(--text);
+  }
+  .flash-pct {
+    font-size: 11px; color: var(--text-muted);
+    margin-top: 4px; font-family: ui-monospace, monospace;
+    text-align: right;
+  }
+  .flash-msg {
+    font-size: 11px; color: var(--text-muted);
+    margin-top: 6px;
+  }
+  .bar-fill.indet {
+    width: 30%;
+    animation: indet 1.4s infinite linear;
+  }
+  @keyframes indet {
+    0%   { margin-left: -30%; width: 30%; }
+    50%  { margin-left: 50%;  width: 30%; }
+    100% { margin-left: 100%; width: 0%; }
+  }
 
   /* Bloque exportable a PDF */
   .profile-export {

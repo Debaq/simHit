@@ -9,8 +9,18 @@
     "artifacts": [
       {
         "board": "esp32-c3-supermini",
+        "image_type": "merged",
+        "flash_address": 0,
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.0.0/simhit-fw-1.0.0-esp32c3.merged.bin",
+        "sha256": "5791e38b5662648b6f0d97d70fb997789030fc99eabb0fa26dd7a56e22c94ae2",
+        "size_bytes": 4194304
+      },
+      {
+        "board": "esp32-c3-supermini",
+        "image_type": "app",
+        "flash_address": 65536,
         "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.0.0/simhit-fw-1.0.0-esp32c3.bin",
-        "sha256": null
+        "sha256": "fe21e29feb77d9f7cf29087ba2d3e802b3f8933b130c96ec97332c9bb38fe35f"
       }
     ]
   },

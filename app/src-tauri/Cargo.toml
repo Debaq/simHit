@@ -28,4 +28,14 @@ serde_json = "1"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
+# espflash v3: API de librería para detectar chip ESP y flashear .bin.
+# default-features=false desactiva los binarios (esto-flash CLI) y deja solo
+# la lib + el feature serialport para descubrir puertos USB.
+espflash = { version = "3", default-features = false, features = ["serialport"] }
+serialport = "4"
+# Descarga de los .bin del manifest (Releases). reqwest con tls=rustls evita
+# arrastrar OpenSSL en Windows.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["fs", "io-util"] }
 
