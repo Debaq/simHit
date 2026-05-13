@@ -4,6 +4,10 @@ const FIRMWARE_BAUD = 460800;
 // ESP32 hace autoreset al abrir DTR; esperar a "SimHit start" o este timeout.
 const BOOT_TIMEOUT_MS = 3000;
 const STORAGE_KEY = 'simhit:sensorAxes';
+// Tiempo de escucha por puerto al sondear con HELLO. El ESP32 puede estar
+// reiniciandose por el DTR al abrir el puerto, asi que damos margen para el
+// banner de boot ademas de la respuesta directa a HELLO.
+const PROBE_TIMEOUT_MS = 2000;
 
 // CRC-16 CCITT (poly 0x1021, init 0xFFFF, sin reflexion). Replica el calculo
 // del firmware. Aplicado sobre el payload (todo lo previo al ;CRC final).
@@ -61,7 +65,12 @@ function loadAxes(): AxesConfig {
 class SerialStore {
   connected = $state(false);
   connecting = $state(false);
+  // True mientras refreshAndAutoSelect() esta sondeando puertos con HELLO.
+  // La UI deshabilita el dropdown / boton refresh durante este lapso.
+  probing = $state(false);
   portPath = $state<string | null>(null);
+  // Lista mostrada en la UI: solo puertos confirmados como SimHIT (post-probe)
+  // o todos los disponibles si todavia no se sondeo (fallback de listPorts).
   ports = $state<string[]>([]);
   lastError = $state<string | null>(null);
   // última línea leída del firmware (debug)
@@ -140,6 +149,124 @@ class SerialStore {
     } catch (e) {
       this.lastError = String(e);
       this.ports = [];
+    }
+  }
+
+  // Intenta identificar un puerto como SimHIT abriendolo, enviando "HELLO\n"
+  // y observando si responde con "HELLO" o con el banner de boot del firmware
+  // (cuando el ESP32 esta reiniciando por el DTR al abrir el puerto).
+  // No deja el puerto abierto: siempre cierra antes de retornar.
+  private async probeOne(path: string): Promise<boolean> {
+    // Pequenio retry si el puerto reporta ocupado justo despues de cerrarse
+    // en el probe anterior (algunos backends del plugin tardan en liberar fd).
+    let sp: SerialPort | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        sp = new SerialPort({ path, baudRate: FIRMWARE_BAUD });
+        await sp.open();
+        break;
+      } catch (e) {
+        sp = null;
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 100));
+          continue;
+        }
+        // Puerto inaccesible (ocupado, sin permiso, no existe): no es SimHIT.
+        console.info(`[serial probe] no se pudo abrir ${path}:`, String(e));
+        return false;
+      }
+    }
+    if (!sp) return false;
+
+    let buffer = '';
+    let matched = false;
+    const onLine = (line: string) => {
+      // Match estricto: respuesta directa a HELLO o banner del firmware.
+      // El firmware imprime exactamente "HELLO" tras recibir el comando,
+      // y "SimHit configure" / "SimHit start" durante el setup.
+      if (line === 'HELLO' || line.includes('HELLO')) {
+        matched = true;
+        return;
+      }
+      if (line.includes('SimHit configure') || line.includes('SimHit start')) {
+        matched = true;
+      }
+    };
+    const onData = (data: Uint8Array | string) => {
+      const chunk = typeof data === 'string' ? data : new TextDecoder().decode(data);
+      buffer += chunk;
+      let nl;
+      while ((nl = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (line) onLine(line);
+      }
+    };
+
+    try {
+      await sp.startListening();
+      await sp.listen(onData, false);
+      // Si el ESP32 ya esta corriendo (no se reseteo), HELLO obtiene
+      // respuesta inmediata. Si se acaba de resetear por DTR, el banner
+      // de boot llega solo, tambien contara como match.
+      try { await sp.write('HELLO\n'); } catch { /* puerto puede haber muerto */ }
+
+      const t0 = Date.now();
+      while (Date.now() - t0 < PROBE_TIMEOUT_MS) {
+        if (matched) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    } catch (e) {
+      console.info(`[serial probe] error sondeando ${path}:`, String(e));
+    } finally {
+      try { await sp.stopListening(); } catch { /* ignore */ }
+      try { await sp.close(); } catch { /* ignore */ }
+    }
+    return matched;
+  }
+
+  // Sondea secuencialmente cada puerto disponible (excluidos ttyS*) y
+  // devuelve la lista con el flag isSimHit. Secuencial para evitar contencion
+  // de recursos del plugin serial.
+  async probePorts(): Promise<{ path: string; isSimHit: boolean }[]> {
+    let candidates: string[] = [];
+    try {
+      const result = await SerialPort.available_ports();
+      candidates = Object.keys(result ?? {}).filter((p) => !/ttyS\d+$/i.test(p));
+      this.lastError = null;
+    } catch (e) {
+      this.lastError = `Error al listar puertos: ${String(e)}`;
+      return [];
+    }
+    const out: { path: string; isSimHit: boolean }[] = [];
+    for (const path of candidates) {
+      const isSimHit = await this.probeOne(path);
+      out.push({ path, isSimHit });
+    }
+    return out;
+  }
+
+  // Refresca la lista de puertos sondeando cada uno con HELLO y autoselecciona
+  // si hay exactamente un SimHIT detectado. NO conecta automaticamente: la
+  // conexion sigue siendo manual via connect().
+  async refreshAndAutoSelect(): Promise<void> {
+    // No tocar puertos durante una conexion activa: cerrar/abrir interrumpiria
+    // la sesion en curso.
+    if (this.connected || this.connecting) return;
+    if (this.probing) return;
+    this.probing = true;
+    try {
+      const results = await this.probePorts();
+      const simhitPaths = results.filter((r) => r.isSimHit).map((r) => r.path);
+      this.ports = simhitPaths;
+      if (simhitPaths.length === 1) {
+        this.portPath = simhitPaths[0];
+      } else if (this.portPath && !simhitPaths.includes(this.portPath)) {
+        // La seleccion previa ya no esta disponible.
+        this.portPath = null;
+      }
+    } finally {
+      this.probing = false;
     }
   }
 
