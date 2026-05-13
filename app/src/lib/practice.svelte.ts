@@ -6,11 +6,14 @@
 import { acceptance } from '$lib/acceptance.svelte';
 import { sim, isHorizontalSide, type Verdict, type Impulse, type ImpulseSide } from '$lib/simulator.svelte';
 import type { Escenario } from '$lib/bundle.svelte';
+import type { Channel } from '$lib/scenario.svelte';
 
 export interface SeqItem {
   /** Posición original en la secuencia (no cambia tras la mezcla). */
   idx: number;
   acceptanceId: string;
+  /** Canal objetivo del item (#13 F8). Solo presente en variantes 'multi'. */
+  targetChannel?: Channel;
 }
 
 export interface Attempt {
@@ -69,7 +72,7 @@ class PracticeStore {
   active = $state(false);
   paused = $state(false);
   bundleId = $state<string | null>(null);
-  variant = $state<'horiz' | 'vert'>('horiz');
+  variant = $state<'horiz' | 'vert' | 'multi'>('horiz');
   /** Modo de finalización del bundle. */
   mode = $state<'attempts' | 'hits'>('attempts');
   /** Requeridos por preset (para modo 'hits'). */
@@ -163,15 +166,21 @@ class PracticeStore {
     this.practitioner = practitioner.trim();
 
     this.bundleId = b.id;
-    this.variant = b.kind === 'practica-vert' ? 'vert' : 'horiz';
+    this.variant =
+      b.kind === 'practica-vert' ? 'vert' :
+      b.kind === 'practica-multi' ? 'multi' : 'horiz';
     this.mode = b.mode ?? 'attempts';
 
-    // Construir secuencia base en orden de la lista del docente.
+    // Construir secuencia base en orden de la lista del docente. En 'multi'
+    // cada item lleva su `targetChannel` para que el HUD pueda mostrar el
+    // canal exacto y la transición de plano cuando cambia.
     const base: SeqItem[] = [];
     let idx = 0;
     for (const g of goals) {
       for (let i = 0; i < g.count; i++) {
-        base.push({ idx: idx++, acceptanceId: g.acceptanceId });
+        const item: SeqItem = { idx: idx++, acceptanceId: g.acceptanceId };
+        if (g.targetChannel) item.targetChannel = g.targetChannel;
+        base.push(item);
       }
     }
     const order = b.order ?? 'random';
@@ -242,6 +251,14 @@ class PracticeStore {
     const isHoriz = isHorizontalSide(side);
     if (this.variant === 'vert' && isHoriz) return;
     if (this.variant === 'horiz' && !isHoriz) return;
+    // variant 'multi': se aceptan los 6 canales. Si el goal actual fija un
+    // canal específico vía `targetChannel`, los impulsos de otros canales se
+    // registran como intento fuera de objetivo (ok=false) — esto permite que
+    // el practicante vea feedback inmediato si dispara en el canal equivocado.
+    let offTarget = false;
+    if (this.variant === 'multi' && cur.targetChannel && side !== cur.targetChannel) {
+      offTarget = true;
+    }
 
     // Solo marcar consumido si el impulso pasó los filtros y se va a procesar.
     this.lastSeenImpulseId = impulseId;
@@ -252,16 +269,21 @@ class PracticeStore {
     const traceHead: number[] = imp ? Array.from(imp.head) : [];
     const traceEye: number[] = imp ? Array.from(imp.eye) : [];
 
+    const reasons = verdict.reasons.slice();
+    if (offTarget && cur.targetChannel) {
+      reasons.unshift(`canal fuera de objetivo (esperado ${cur.targetChannel}, recibido ${side})`);
+    }
+    const ok = verdict.ok && !offTarget;
     this.attempts = [...this.attempts, {
       itemIdx: cur.idx,
       acceptanceId: cur.acceptanceId,
       side,
-      ok: verdict.ok,
+      ok,
       peak: verdict.peak,
       gain: verdict.gain,
       durMs: verdict.durMs,
       amp: verdict.amp,
-      reasons: verdict.reasons.slice(),
+      reasons,
       ts: Date.now(),
       impulseId,
       traceT,
@@ -270,11 +292,13 @@ class PracticeStore {
     }];
 
     if (this.mode === 'attempts') {
-      // Cada intento avanza, ok o no.
-      this.cursor++;
+      // En 'multi' con canal objetivo: un impulso en el canal equivocado NO
+      // consume el goal (no avanza el cursor). Sí se registra para que el
+      // practicante vea el intento fallido en el historial.
+      if (!offTarget) this.cursor++;
     } else {
       // hits: solo aciertos avanzan. Los fallos quedan registrados pero no cuentan.
-      if (verdict.ok) {
+      if (ok) {
         const newCount = (this.hitsByPreset[cur.acceptanceId] ?? 0) + 1;
         this.hitsByPreset = { ...this.hitsByPreset, [cur.acceptanceId]: newCount };
         // En orden secuencial: solo rotar cuando el preset actual cumplió sus aciertos.

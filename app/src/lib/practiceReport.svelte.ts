@@ -41,7 +41,7 @@ export interface PracticeReport {
   practitioner: string;
   bundleId: string;
   bundleName: string;
-  variant: 'horiz' | 'vert';
+  variant: 'horiz' | 'vert' | 'multi';
   mode: 'attempts' | 'hits';
   startedMs: number;
   endedMs: number;
