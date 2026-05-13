@@ -113,16 +113,8 @@
     triggerDownload(blob, `${id}.json`);
   }
 
-  async function delPractice(id: string, label: string) {
-    if (await ui.confirm(`Eliminar informe de práctica`, `"${label}" — esta acción no se puede deshacer.`, { danger: true })) {
-      await practiceReports.remove(id);
-    }
-  }
-  async function delSim(id: string, label: string) {
-    if (await ui.confirm(`Eliminar informe de simulación`, `"${label}" — esta acción no se puede deshacer.`, { danger: true })) {
-      reports.remove(id);
-    }
-  }
+  // Eliminación deshabilitada temporalmente mientras se hace investigación
+  // de uso de los informes (no perder datos por borrado accidental).
 </script>
 
 <div class="app">
@@ -201,7 +193,6 @@
                   <a href={`/informes/practica/${r.id}`}>Ver</a>
                   {#if r.hasPdf}<button class="link" onclick={() => downloadPracticePdf(r.id)}>PDF</button>{/if}
                   <button class="link" onclick={() => exportPracticeJson(r.id)}>JSON</button>
-                  <button class="link danger" onclick={() => delPractice(r.id, r.practitioner || r.id)}>Eliminar</button>
                 </td>
               </tr>
             {/each}
@@ -248,7 +239,6 @@
                   <a href={`/informe/${r.id}`}>Ver</a>
                   <button class="link" onclick={() => downloadSimPdf(r.id)}>PDF</button>
                   <button class="link" onclick={() => exportSimJson(r.id)}>JSON</button>
-                  <button class="link danger" onclick={() => delSim(r.id, r.examenCode)}>Eliminar</button>
                 </td>
               </tr>
             {/each}
@@ -311,7 +301,6 @@
     cursor: pointer; padding: 0; font-size: 13px; text-decoration: none;
   }
   .actions a:hover, .actions button.link:hover { text-decoration: underline; }
-  .actions .danger { color: var(--danger, #e35d6a); }
 
   button.primary {
     background: var(--accent, #4a9eff); color: white; border: 0;

@@ -68,13 +68,7 @@
     }
   }
 
-  async function deleteReport() {
-    if (!report) return;
-    if (await ui.confirm('Eliminar informe', `"${report.practitioner || report.id}" — esta acción no se puede deshacer.`, { danger: true })) {
-      await practiceReports.remove(report.id);
-      goto('/informes');
-    }
-  }
+  // Eliminación deshabilitada temporalmente (investigación de uso en curso).
 
   let hits = $derived(report ? report.attempts.filter((a) => a.ok).length : 0);
   let totalImpulses = $derived(report?.attempts.length ?? 0);
@@ -101,7 +95,6 @@
           <button class="secondary" onclick={regeneratePdf} disabled={regenerating || !report}>
             {regenerating ? 'Generando…' : (report?.hasPdf ? 'Regenerar PDF' : 'Generar PDF')}
           </button>
-          <button class="danger" onclick={deleteReport}>Eliminar</button>
         </div>
       </div>
     </header>
@@ -221,6 +214,5 @@
   button.primary { background: var(--accent, #4a9eff); color: white; border: 0; padding: 6px 12px; border-radius: 6px; cursor: pointer; }
   button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px; cursor: pointer; }
   button.secondary:disabled { opacity: 0.5; cursor: default; }
-  button.danger { background: transparent; color: var(--danger, #e35d6a); border: 1px solid var(--danger, #e35d6a); padding: 6px 12px; border-radius: 6px; cursor: pointer; }
   button.link { background: transparent; border: 0; color: var(--accent, #4a9eff); cursor: pointer; padding: 0; font-size: 13px; }
 </style>
