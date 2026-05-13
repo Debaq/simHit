@@ -6,6 +6,7 @@
 //   Salida:  "angX;angY;angZ;gyroX;gyroY;gyroZ\n"  (° y °/s)
 //   Entrada: "IMU ON" | "IMU OFF" | "IMU CAL" | "IMU CLR" | "IMU STATUS"
 //            "MAG CAL" | "MAG CLR" | "MAG STATUS"
+//            "LASER ON" | "LASER OFF" | "LASER STATUS"
 //            "HELLO" | "RESET"
 
 #include <Wire.h>
@@ -19,6 +20,9 @@
 
 #define I2C_SDA_PIN 6
 #define I2C_SCL_PIN 7
+
+// Laser: GPIO3 (active-high). Driver simple: pin → resistencia → módulo laser → GND.
+#define LASER_PIN 5
 
 // Tasa de muestreo / fusión
 #define SAMPLE_RATE_HZ 200.0f
@@ -42,6 +46,7 @@ Adafruit_Madgwick filter;
 
 // Estado
 bool start_imu = false;
+bool laser_on  = false;
 
 // Bias gyro (rad/s) — calculado en IMU CAL
 float gx_bias = 0.0f, gy_bias = 0.0f, gz_bias = 0.0f;
@@ -141,6 +146,9 @@ void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
   delay(100);
   Serial.println("SimHit configure");
+
+  pinMode(LASER_PIN, OUTPUT);
+  digitalWrite(LASER_PIN, LOW);
 
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 400000);
 
@@ -289,6 +297,17 @@ void handleCommand(String command) {
     clearMagCal();
   } else if (command == "MAG STATUS") {
     printMagStatus();
+  } else if (command == "LASER ON") {
+    laser_on = true;
+    digitalWrite(LASER_PIN, HIGH);
+    Serial.println("LASER ON");
+  } else if (command == "LASER OFF") {
+    laser_on = false;
+    digitalWrite(LASER_PIN, LOW);
+    Serial.println("LASER OFF");
+  } else if (command == "LASER STATUS") {
+    Serial.print("LASER STATUS ");
+    Serial.println(laser_on ? "ON" : "OFF");
   } else if (command == "HELLO") {
     Serial.println("HELLO");
   } else if (command == "RESET") {
@@ -296,7 +315,7 @@ void handleCommand(String command) {
     delay(10);
     ESP.restart();
   }
-  // LED/OLED retirados en esta revisión; comandos L*/O*/BAR* se ignoran.
+  // OLED/LED bar retirados; comandos O*/BAR* se ignoran.
 }
 
 void calibrateIMU() {

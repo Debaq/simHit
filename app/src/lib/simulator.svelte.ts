@@ -3,6 +3,7 @@ import { scenarios } from '$lib/scenario.svelte';
 import { eyeset } from '$lib/eyeset.svelte';
 import { serial } from '$lib/serial.svelte';
 import { acceptance } from '$lib/acceptance.svelte';
+import { settings } from '$lib/settings.svelte';
 
 export type Impulse = {
   id: number;
@@ -109,7 +110,7 @@ const MAX_IMPULSE_MS = 600;
 class Simulator {
   connected = $state(false);
   cameraOn = $state(false);
-  mode = $state<'idle' | 'free' | 'scenario'>('idle');
+  mode = $state<'idle' | 'scenario'>('idle');
   currentScenarioName = $state<string | null>(null);
   currentStep = $state<string | null>(null);
   gaze = $state(0);
@@ -139,7 +140,6 @@ class Simulator {
   private startMs = 0;
   private interval?: ReturnType<typeof setInterval>;
   private blinkTimeout?: ReturnType<typeof setTimeout>;
-  private nextImpulseMs = 0;
   private impulseId = 1;
   private cancelToken = 0;
   private belowSinceMs: number | null = null;
@@ -186,16 +186,6 @@ class Simulator {
     this.blinkFrame = null;
   }
 
-  startFreeMode() {
-    if (!this.connected) return;
-    this.stop();
-    this.resetBuffers();
-    this.mode = 'free';
-    this.currentScenarioName = 'Modo libre (random)';
-    this.cancelToken++;
-    this.scheduleNextRandom();
-  }
-
   /**
    * Activa un "paciente virtual": la dirección del impulso (manual o desde
    * firmware) selecciona el canal correspondiente y aplica su config. Mock
@@ -213,6 +203,7 @@ class Simulator {
     if (serial.connected) {
       // Sensor real: la detección se hace en tick() por umbral de velocidad.
       this.currentStep = 'Esperando movimiento de cabeza';
+      if (settings.laserMode === 'armed') void serial.sendCommand('LASER ON');
       return;
     }
 
@@ -251,6 +242,9 @@ class Simulator {
     if (this.capturing) this.commitImpulse();
     this.impCfg = null;
     this.belowSinceMs = null;
+    if (settings.laserMode === 'armed' && serial.connected) {
+      void serial.sendCommand('LASER OFF');
+    }
   }
 
   clearImpulses() {
@@ -338,21 +332,9 @@ class Simulator {
     let head = (Math.random() - 0.5) * 5;
     let eye = (Math.random() - 0.5) * 3;
 
-    // commit + schedule next (sólo en modo free)
     if (this.impCfg && now - this.impCfg.startMs > IMP_DURATION_MS + 80) {
       this.commitImpulse();
       this.impCfg = null;
-      if (this.mode === 'free') this.scheduleNextRandom();
-    }
-
-    // disparo random en modo free
-    if (this.mode === 'free' && !this.impCfg && now >= this.nextImpulseMs) {
-      this.triggerImpulse({
-        side: 'random',
-        gain: 0.85 + Math.random() * 0.1,
-        peakVel: 150 + Math.random() * 80,
-        saccade: 'none',
-      });
     }
 
     if (this.impCfg) {
@@ -500,6 +482,9 @@ class Simulator {
           if (artifact === 'blink') {
             setTimeout(() => this.runBlink(), 80 + Math.random() * 80);
           }
+          if (settings.laserMode === 'armed') {
+            void serial.sendCommand('LASER OFF');
+          }
         }
       }
 
@@ -559,6 +544,9 @@ class Simulator {
           else this.capturing = null;
           this.impCfg = null;
           this.belowSinceMs = null;
+          if (settings.laserMode === 'armed' && this.mode === 'scenario') {
+            void serial.sendCommand('LASER ON');
+          }
         }
       } else {
         this.belowSinceMs = null;
@@ -609,10 +597,6 @@ class Simulator {
     this.capturing = null;
     this.lastImpulse = imp;
     this.lastVerdict = evaluateImpulse(imp, peakHead, gain);
-  }
-
-  private scheduleNextRandom() {
-    this.nextImpulseMs = performance.now() + 2000 + Math.random() * 2500;
   }
 
   private scheduleBlink() {

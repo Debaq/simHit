@@ -8,6 +8,15 @@
   import AudioSettings from './AudioSettings.svelte';
   import { audio } from '$lib/audio.svelte';
   import { ui } from '$lib/dialog.svelte';
+  import { settings, type LaserMode } from '$lib/settings.svelte';
+
+  const laserNext: Record<LaserMode, LaserMode> = { off: 'armed', armed: 'on', on: 'off' };
+  const laserIcon: Record<LaserMode, string> = { off: '○', armed: '◐', on: '●' };
+  const laserTitle: Record<LaserMode, string> = {
+    off: 'Láser: apagado (click → Auto)',
+    armed: 'Láser: auto · encendido entre impulsos (click → Encendido)',
+    on: 'Láser: encendido (click → Apagado)',
+  };
 
   let audioModalOpen = $state(false);
 
@@ -137,11 +146,14 @@
         {sim.mode === 'scenario' ? (serial.connected ? '■ Detener test' : '■ Detener demo') : (serial.connected ? '▶ Iniciar test' : '▶ Iniciar demo')}
       </button>
       <button
-        disabled={!sim.connected || (serial.connected && !serial.calibrated)}
-        title={serial.connected && !serial.calibrated ? 'Calibrar SimHit antes de iniciar' : ''}
-        onclick={() => (sim.mode === 'free' ? sim.stop() : sim.startFreeMode())}
+        class="laser-toggle laser-{settings.laserMode}"
+        disabled={!serial.connected}
+        onclick={() => settings.setLaserMode(laserNext[settings.laserMode])}
+        title={laserTitle[settings.laserMode]}
+        aria-label={laserTitle[settings.laserMode]}
       >
-        {sim.mode === 'free' ? '■ Detener libre' : '⤧ Modo libre'}
+        <span class="laser-dot">{laserIcon[settings.laserMode]}</span>
+        <span class="laser-text">Láser</span>
       </button>
       <button
         disabled={sim.impulsesLL.length + sim.impulsesRL.length === 0}
@@ -193,4 +205,18 @@
   }
   .actions button { font-size: 12px; padding: 6px 10px; }
   button:disabled { opacity: .4; cursor: not-allowed; }
+  .laser-toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; padding: 6px 10px;
+    border: 1px solid var(--border-strong); background: var(--surface);
+    border-radius: var(--radius-sm); cursor: pointer;
+  }
+  .laser-toggle:hover:not(:disabled) { background: var(--primary-soft); }
+  .laser-dot { font-size: 14px; line-height: 1; }
+  .laser-text { font-weight: 500; }
+  .laser-off .laser-dot { color: var(--text-muted); }
+  .laser-armed { border-color: #f59e0b; }
+  .laser-armed .laser-dot { color: #f59e0b; }
+  .laser-on { border-color: #ef4444; background: rgba(239,68,68,0.08); }
+  .laser-on .laser-dot { color: #ef4444; }
 </style>
