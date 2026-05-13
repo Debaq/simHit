@@ -2,23 +2,21 @@
 // de cámara. El docente arma escenarios y, al activar uno, el simulador queda
 // configurado con las tres partes a la vez.
 
-import { scenarios, CHANNELS, type Channel } from '$lib/scenario.svelte';
+import { scenarios, CHANNELS, HORIZONTAL_CHANNELS, VERTICAL_CHANNELS, type Channel } from '$lib/scenario.svelte';
 import { acceptance } from '$lib/acceptance.svelte';
 import { eyeset } from '$lib/eyeset.svelte';
 
-export type BundleKind = 'clinico' | 'practica-horiz' | 'practica-vert' | 'practica-multi';
+export type BundleKind = 'clinico' | 'practica';
 export type PracticeOrder = 'random' | 'sequential';
 export type PracticeMode = 'attempts' | 'hits';
 
-/** Un objetivo de práctica: cuántos impulsos se piden con un preset de aceptación.
- *  `targetChannel` (opcional, #13 F8): fija el canal específico que se quiere
- *  practicar en ese goal. Solo lo usan los bundles `practica-multi` para guiar
- *  la transición de plano (horizontal → LARP → RALP). Si está indefinido, el
- *  comportamiento es el legado (cualquier canal del plano de la variant). */
+/** Un objetivo de práctica: canal específico + nivel de aceptación + cantidad.
+ *  En la variante unificada de práctica, `targetChannel` es obligatorio: cada
+ *  objetivo apunta a un único canal anatómico (LL/RL/LA/RP/RA/LP). */
 export interface PracticeGoal {
   acceptanceId: string;
   count: number;
-  targetChannel?: Channel;
+  targetChannel: Channel;
 }
 
 export interface Escenario {
@@ -38,18 +36,23 @@ export interface Escenario {
   updated: number;
 }
 
+/** Goals por defecto al crear una práctica nueva: un objetivo por cada uno de
+ *  los 6 canales con nivel estándar y 5 intentos. */
 export function defaultGoals(): PracticeGoal[] {
   return [
-    { acceptanceId: 'principiante', count: 3 },
-    { acceptanceId: 'estandar', count: 3 },
-    { acceptanceId: 'avanzado', count: 3 },
+    { acceptanceId: 'estandar', count: 5, targetChannel: 'LL' },
+    { acceptanceId: 'estandar', count: 5, targetChannel: 'RL' },
+    { acceptanceId: 'estandar', count: 5, targetChannel: 'LA' },
+    { acceptanceId: 'estandar', count: 5, targetChannel: 'RP' },
+    { acceptanceId: 'estandar', count: 5, targetChannel: 'RA' },
+    { acceptanceId: 'estandar', count: 5, targetChannel: 'LP' },
   ];
 }
 
 const LS_LIST = 'simhit:bundles:list';
 const LS_ACTIVE = 'simhit:bundles:active';
 /** Versionado: bumpear cuando se agregan nuevos seeds para que usuarios viejos los vean. */
-const LS_SEEDED = 'simhit:bundles:seeded:v4';
+const LS_SEEDED = 'simhit:bundles:seeded:v5';
 
 // Escenarios de muestra que se siembran la primera vez. El docente puede
 // borrarlos y no vuelven (la flag `seeded` queda persistida).
@@ -84,40 +87,14 @@ function buildStarterBundles(): Escenario[] {
       updated: now - 2,
     },
     {
-      id: 'es_seed_practica_h',
-      name: '4. Práctica horizontal',
-      kind: 'practica-horiz',
+      id: 'es_seed_practica',
+      name: '4. Práctica vHIT',
+      kind: 'practica',
       casoId: '',
       acceptanceId: 'estandar',
       eyesetId: '',
-      goals: defaultGoals(),
-      order: 'random',
-      mode: 'attempts',
-      updated: now - 3,
-    },
-    {
-      id: 'es_seed_practica_v',
-      name: '5. Práctica vertical',
-      kind: 'practica-vert',
-      casoId: '',
-      acceptanceId: 'estandar',
-      eyesetId: '',
-      goals: defaultGoals(),
-      order: 'random',
-      mode: 'attempts',
-      updated: now - 4,
-    },
-    {
-      id: 'es_seed_practica_multi',
-      name: '6. Práctica multicanal (6 canales)',
-      kind: 'practica-multi',
-      casoId: '',
-      acceptanceId: 'estandar',
-      eyesetId: '',
-      // Orden anatómico: horizontal → LARP → RALP. Cada goal apunta a un canal
-      // específico para que la guía progresiva pueda anunciar la transición
-      // de plano. El acceptanceId 'estandar' es el preset común; el orden
-      // secuencial asegura que se mantenga la progresión.
+      // Orden anatómico: horizontal → LARP → RALP. Cada goal fija un canal
+      // específico para guiar la transición entre planos.
       goals: [
         { acceptanceId: 'estandar', count: 5, targetChannel: 'LL' },
         { acceptanceId: 'estandar', count: 5, targetChannel: 'RL' },
@@ -128,7 +105,7 @@ function buildStarterBundles(): Escenario[] {
       ],
       order: 'sequential',
       mode: 'attempts',
-      updated: now - 5,
+      updated: now - 3,
     },
   ];
 }
@@ -157,13 +134,25 @@ function loadList(): Escenario[] {
   } catch { return []; }
 }
 
-/** Migra escenarios persistidos a la forma actual. */
+/** Migra escenarios persistidos a la forma actual.
+ *
+ *  Reglas para bundles legados de práctica:
+ *   - `practica-horiz` → cada goal sin targetChannel se expande a 2 goals
+ *     (LL y RL) con el mismo acceptanceId y count. Si tenía targetChannel
+ *     válido, se respeta.
+ *   - `practica-vert`  → análogo, expandido a 4 goals (LA, RP, RA, LP).
+ *   - `practica-multi` → ya tenía targetChannel por goal; los que no lo
+ *     tengan se descartan (no se puede inferir el canal).
+ *  En todos los casos el kind resultante es `'practica'`.
+ */
 function migrateBundle(raw: any): Escenario {
-  const kind: BundleKind = raw.kind ?? 'clinico';
-  let goals = raw.goals;
-  // Formato viejo: { principiante, estandar, avanzado } → array.
+  const legacyKind: string = raw.kind ?? 'clinico';
+  const kind: BundleKind = legacyKind === 'clinico' ? 'clinico' : 'practica';
+  let goals: any = raw.goals;
+
+  // Formato muy viejo: { principiante, estandar, avanzado } → array.
   if (goals && !Array.isArray(goals) && typeof goals === 'object') {
-    const arr: PracticeGoal[] = [];
+    const arr: { acceptanceId: string; count: number }[] = [];
     for (const id of ['principiante', 'estandar', 'avanzado']) {
       if (typeof goals[id] === 'number' && goals[id] > 0) {
         arr.push({ acceptanceId: id, count: goals[id] });
@@ -171,16 +160,34 @@ function migrateBundle(raw: any): Escenario {
     }
     goals = arr;
   }
-  // Conservar targetChannel si está presente (solo valores válidos del enum).
-  if (Array.isArray(goals)) {
-    goals = goals.map((g: any) => {
-      const out: PracticeGoal = { acceptanceId: g.acceptanceId, count: g.count };
-      if (typeof g.targetChannel === 'string' && (CHANNELS as readonly string[]).includes(g.targetChannel)) {
-        out.targetChannel = g.targetChannel as Channel;
+
+  let migratedGoals: PracticeGoal[] | undefined;
+
+  if (kind === 'practica' && Array.isArray(goals)) {
+    const expandTo: (raw: any) => PracticeGoal[] = (g) => {
+      const accId: string = g.acceptanceId;
+      const count: number = g.count | 0;
+      const hasChannel =
+        typeof g.targetChannel === 'string' &&
+        (CHANNELS as readonly string[]).includes(g.targetChannel);
+
+      if (hasChannel) {
+        return [{ acceptanceId: accId, count, targetChannel: g.targetChannel as Channel }];
       }
-      return out;
-    });
+      if (legacyKind === 'practica-horiz') {
+        return HORIZONTAL_CHANNELS.map((c) => ({ acceptanceId: accId, count, targetChannel: c }));
+      }
+      if (legacyKind === 'practica-vert') {
+        return VERTICAL_CHANNELS.map((c) => ({ acceptanceId: accId, count, targetChannel: c }));
+      }
+      // practica-multi sin targetChannel: no es inferible → descartar.
+      // kind 'practica' nuevo: targetChannel ya debería existir; si no, descartar.
+      return [];
+    };
+    migratedGoals = goals.flatMap(expandTo).filter((g) => g.count > 0);
+    if (migratedGoals.length === 0) migratedGoals = defaultGoals();
   }
+
   return {
     id: raw.id,
     name: raw.name,
@@ -188,7 +195,7 @@ function migrateBundle(raw: any): Escenario {
     casoId: raw.casoId ?? '',
     acceptanceId: raw.acceptanceId ?? 'estandar',
     eyesetId: raw.eyesetId ?? '',
-    goals: kind === 'clinico' ? undefined : (goals ?? defaultGoals()),
+    goals: kind === 'clinico' ? undefined : (migratedGoals ?? defaultGoals()),
     order: raw.order ?? 'random',
     mode: raw.mode ?? 'attempts',
     updated: raw.updated ?? Date.now(),
