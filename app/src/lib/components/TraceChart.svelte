@@ -2,11 +2,12 @@
   import { onMount } from 'svelte';
   import uPlot from 'uplot';
   import 'uplot/dist/uPlot.min.css';
-  import { sim } from '$lib/simulator.svelte';
+  import { sim, CHANNEL_AXES } from '$lib/simulator.svelte';
+  import type { Channel } from '$lib/scenario.svelte';
   import { acceptance } from '$lib/acceptance.svelte';
 
-  let { title = 'Tiempo real', hideEye = false, showPeakBands = false }:
-    { title?: string; hideEye?: boolean; showPeakBands?: boolean } = $props();
+  let { title = 'Tiempo real', hideEye = false, showPeakBands = false, channel = null }:
+    { title?: string; hideEye?: boolean; showPeakBands?: boolean; channel?: Channel | null } = $props();
   let host: HTMLDivElement;
   let container: HTMLDivElement;
   let plot: uPlot | undefined;
@@ -65,8 +66,9 @@
               (u) => {
                 const cfg = acceptance.active;
                 if (!cfg) return;
-                const peakMin = cfg.peakMin;
-                const peakMax = cfg.peakMax;
+                const isVertical = !!channel && channel !== 'LL' && channel !== 'RL';
+                const peakMin = isVertical ? cfg.peakMinV : cfg.peakMinH;
+                const peakMax = isVertical ? cfg.peakMaxV : cfg.peakMaxH;
                 const ctx = u.ctx;
                 const left = u.bbox.left;
                 const top = u.bbox.top;
@@ -114,9 +116,26 @@
       },
     };
 
+    // Proyecta la velocidad cefálica sobre el eje del canal activo si se
+    // pasa `channel`. Para LL/RL coincide con yaw; para verticales combina
+    // yaw + pitch para que el gráfico refleje el eje compuesto del canal.
+    const projectedHead = (): Float64Array => {
+      if (!channel || channel === 'LL' || channel === 'RL') {
+        // LL/RL: ya es ±yaw. Usar headBuf directo (con signo).
+        return sim.headBuf;
+      }
+      const axis = CHANNEL_AXES[channel];
+      const n = sim.headBuf.length;
+      const out = new Float64Array(n);
+      for (let i = 0; i < n; i++) {
+        out[i] = sim.headBuf[i] * axis.yaw + sim.headPitchBuf[i] * axis.pitch;
+      }
+      return out;
+    };
+
     const buildData = () => (hideEye
-      ? [sim.tBuf, sim.headBuf]
-      : [sim.tBuf, sim.headBuf, sim.eyeBuf]) as unknown as uPlot.AlignedData;
+      ? [sim.tBuf, projectedHead()]
+      : [sim.tBuf, projectedHead(), sim.eyeBuf]) as unknown as uPlot.AlignedData;
 
     plot = new uPlot(opts, buildData(), container);
 

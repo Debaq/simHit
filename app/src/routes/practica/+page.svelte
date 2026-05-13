@@ -478,7 +478,7 @@
 
       <section class="row bottom">
         <div class="trace">
-          <TraceChart title="Velocidad cabeza" hideEye showPeakBands />
+          <TraceChart title="Velocidad cabeza" hideEye showPeakBands channel={currentTarget} />
         </div>
       </section>
     </main>

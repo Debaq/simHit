@@ -37,6 +37,16 @@
   }
 
   let path = $derived(page.url?.pathname ?? '/');
+
+  // Índice estable 1-based del escenario activo: posición en la lista
+  // ordenada por fecha de creación (updated asc). No depende del nombre.
+  let activeBundleNumber = $derived.by(() => {
+    const act = bundles.active;
+    if (!act) return null;
+    const sorted = [...bundles.list].sort((a, b) => a.updated - b.updated);
+    const i = sorted.findIndex((b) => b.id === act.id);
+    return i >= 0 ? i + 1 : null;
+  });
   let selectedPort = $state<string>('');
   let calModal = $state<'closed' | 'instructions' | 'running' | 'done' | 'error'>('closed');
   let calError = $state<string>('');
@@ -226,11 +236,11 @@
       <button
         class="bundle-chip"
         onclick={() => goto('/docente')}
-        title="Escenario activo — clic para abrir Modo docente"
+        title={`Escenario activo: ${bundles.active.name} — clic para abrir Modo docente`}
       >
         <span class="ic" aria-hidden="true">🎓</span>
         <span class="lab">Escenario</span>
-        <b>{bundles.active.name}</b>
+        <b>{activeBundleNumber ?? '?'}</b>
       </button>
     {/if}
 

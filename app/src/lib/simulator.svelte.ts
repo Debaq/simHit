@@ -237,6 +237,9 @@ class Simulator {
 
   tBuf = new Float64Array(N);
   headBuf = new Float64Array(N);
+  /** Velocidad pitch suavizada para el plot. Permite proyectar la velocidad
+   *  cefálica sobre cualquier eje de canal (verticales LARP/RALP). */
+  headPitchBuf = new Float64Array(N);
   eyeBuf = new Float64Array(N);
 
   private startMs = 0;
@@ -462,6 +465,7 @@ class Simulator {
     // el chart muestre una línea base plana (sin colapsar el rango X).
     for (let i = 0; i < N; i++) this.tBuf[i] = (i - N + 1) / FS;
     this.headBuf.fill(0);
+    this.headPitchBuf.fill(0);
     this.eyeBuf.fill(0);
     this.startMs = performance.now();
     this.rev++;
@@ -558,9 +562,13 @@ class Simulator {
 
     this.tBuf.copyWithin(0, 1);
     this.headBuf.copyWithin(0, 1);
+    this.headPitchBuf.copyWithin(0, 1);
     this.eyeBuf.copyWithin(0, 1);
     this.tBuf[N - 1] = tSec;
     this.headBuf[N - 1] = head;
+    // Mock sin sensor: no hay pitch real, dejar 0 para que las proyecciones
+    // sobre canales verticales no inventen señal.
+    this.headPitchBuf[N - 1] = 0;
     this.eyeBuf[N - 1] = eye;
 
     // ===== Pose mock =====
@@ -623,6 +631,7 @@ class Simulator {
     let lastEyeSig = 0;
     const N_S = yawSamples.length;
     const smoothHistory = new Array<number>(N_S);
+    const smoothPitchHistory = new Array<number>(N_S);
     const eyeHistory = new Array<number>(N_S);
     // Suavizado de pitch independiente (misma τ). Local al tick: no se
     // persiste como campo porque sólo se necesita durante la captura.
@@ -636,6 +645,7 @@ class Simulator {
       this.smoothedHead += (yawRaw - this.smoothedHead) * SMOOTH_ALPHA;
       smoothedPitch += (pitchRaw - smoothedPitch) * SMOOTH_ALPHA;
       smoothHistory[i] = this.smoothedHead;
+      smoothPitchHistory[i] = smoothedPitch;
 
       // Magnitud combinada para detectar inicio. Permite disparar también
       // con impulsos diagonales cuando la cabeza arranca girada ±~45°.
@@ -784,6 +794,7 @@ class Simulator {
       const k = Math.min(N_S, N);
       this.tBuf.copyWithin(0, k);
       this.headBuf.copyWithin(0, k);
+      this.headPitchBuf.copyWithin(0, k);
       this.eyeBuf.copyWithin(0, k);
       // Si N_S>N, conservar las últimas N samples del lote.
       const start = N_S - k;
@@ -793,6 +804,7 @@ class Simulator {
         const si = start + i;
         this.tBuf[idx] = tSec - (N_S - 1 - si) / FS;
         this.headBuf[idx] = smoothHistory[si];
+        this.headPitchBuf[idx] = smoothPitchHistory[si];
         this.eyeBuf[idx] = eyeHistory[si] + eyeNoise;
       }
       this.rev++;
