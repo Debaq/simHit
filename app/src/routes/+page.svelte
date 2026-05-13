@@ -26,16 +26,27 @@
   let editorSide = $state<Side>('LL');
   function openEditor(s: Side) { editorSide = s; editorOpen = true; }
 
+  // El editor expone los 6 canales (#13). Los horizontales tienen sus chart
+  // dedicados en la fila inferior; los verticales se acceden vía la modal.
   const EDITOR_CHANNELS: { id: Side; label: string }[] = [
-    { id: 'LL', label: 'Lateral izquierdo' },
-    { id: 'RL', label: 'Lateral derecho' },
+    { id: 'LL', label: 'Lateral izq.' },
+    { id: 'RL', label: 'Lateral der.' },
+    { id: 'LA', label: 'Anterior izq.' },
+    { id: 'RP', label: 'Posterior der.' },
+    { id: 'RA', label: 'Anterior der.' },
+    { id: 'LP', label: 'Posterior izq.' },
   ];
   function editorImpulsesBy(s: Side): ImpulseSnapshot[] {
-    // El editor del simulador clínico opera sólo sobre canales horizontales.
-    const arr = s === 'LL' ? sim.impulsesLL : sim.impulsesRL;
+    const arr =
+      s === 'LL' ? sim.impulsesLL :
+      s === 'RL' ? sim.impulsesRL :
+      s === 'LA' ? sim.impulsesLA :
+      s === 'RP' ? sim.impulsesRP :
+      s === 'RA' ? sim.impulsesRA :
+      sim.impulsesLP;
     return arr.map((i) => ({
       id: i.id,
-      side: i.side as 'LL' | 'RL',
+      side: i.side,
       t: Array.from(i.t),
       head: Array.from(i.head),
       eye: Array.from(i.eye),

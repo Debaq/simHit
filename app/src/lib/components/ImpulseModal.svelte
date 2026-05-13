@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ImpulseSnapshot, Side } from '$lib/report.svelte';
+  import { SIDE_COLOR, sideFlip, type ImpulseSnapshot, type Side } from '$lib/report.svelte';
 
   type Props = {
     open: boolean;
@@ -41,9 +41,9 @@
   function sideColor(s: Side) {
     const ch = channels.find((c) => c.id === s);
     if (ch?.color) return ch.color;
-    return s === 'LL' ? 'var(--side-ll)' : 'var(--side-rl)';
+    return SIDE_COLOR[s];
   }
-  let flip = $derived(side === 'LL' ? -1 : 1);
+  let flip = $derived(sideFlip(side));
 
   function peak(arr: number[]) {
     let m = 0;

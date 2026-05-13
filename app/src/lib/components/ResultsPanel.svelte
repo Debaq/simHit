@@ -37,12 +37,19 @@
 
   let includedLL = $derived(sim.impulsesLL.filter((i) => !sim.excludedIds.has(i.id)));
   let includedRL = $derived(sim.impulsesRL.filter((i) => !sim.excludedIds.has(i.id)));
-  let gainLL = $derived(
-    includedLL.length === 0 ? 0 : includedLL.reduce((a, i) => a + i.gain, 0) / includedLL.length
-  );
-  let gainRL = $derived(
-    includedRL.length === 0 ? 0 : includedRL.reduce((a, i) => a + i.gain, 0) / includedRL.length
-  );
+  let includedLA = $derived(sim.impulsesLA.filter((i) => !sim.excludedIds.has(i.id)));
+  let includedRP = $derived(sim.impulsesRP.filter((i) => !sim.excludedIds.has(i.id)));
+  let includedRA = $derived(sim.impulsesRA.filter((i) => !sim.excludedIds.has(i.id)));
+  let includedLP = $derived(sim.impulsesLP.filter((i) => !sim.excludedIds.has(i.id)));
+  function meanGain(arr: { gain: number }[]) {
+    return arr.length === 0 ? 0 : arr.reduce((a, i) => a + i.gain, 0) / arr.length;
+  }
+  let gainLL = $derived(meanGain(includedLL));
+  let gainRL = $derived(meanGain(includedRL));
+  let gainLA = $derived(meanGain(includedLA));
+  let gainRP = $derived(meanGain(includedRP));
+  let gainRA = $derived(meanGain(includedRA));
+  let gainLP = $derived(meanGain(includedLP));
 
   let canGenerate = $derived(
     includedLL.length >= MIN_IMPULSES_PER_SIDE && includedRL.length >= MIN_IMPULSES_PER_SIDE
@@ -65,12 +72,15 @@
 
   function snapshotImpulses(): ImpulseSnapshot[] {
     // Solo incluidos: los excluidos en captura no se llevan al informe.
-    // El informe clínico aún sólo modela LL/RL; los canales verticales
-    // (LA/LP/RA/RP) no entran acá hasta que el flujo /informes los soporte.
-    const all = [...includedLL, ...includedRL];
+    // A partir de #13 el informe modela los 6 canales (LL/RL + LA/RP + RA/LP).
+    const all = [
+      ...includedLL, ...includedRL,
+      ...includedLA, ...includedRP,
+      ...includedRA, ...includedLP,
+    ];
     return all.map((i) => ({
       id: i.id,
-      side: i.side as 'LL' | 'RL',
+      side: i.side,
       t: Array.from(i.t),
       head: Array.from(i.head),
       eye: Array.from(i.eye),
@@ -109,6 +119,14 @@
       gainRL: gainRL,
       countLL: includedLL.length,
       countRL: includedRL.length,
+      gainLA: gainLA,
+      gainRP: gainRP,
+      gainRA: gainRA,
+      gainLP: gainLP,
+      countLA: includedLA.length,
+      countRP: includedRP.length,
+      countRA: includedRA.length,
+      countLP: includedLP.length,
       findings: emptyFindings(),
       interpretation: '',
       diagnosis: '',

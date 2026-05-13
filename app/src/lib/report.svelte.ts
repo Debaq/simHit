@@ -1,4 +1,7 @@
-export type Side = 'LL' | 'RL';
+// Canal del impulso. Histórico solo LL/RL (horizontal); a partir de #13 incluye
+// los 4 canales verticales (LARP: LA/RP; RALP: RA/LP). El tipo se mantiene con
+// el nombre `Side` por compatibilidad con código consumidor.
+export type Side = 'LL' | 'RL' | 'LA' | 'RP' | 'RA' | 'LP';
 
 export type ImpulseSnapshot = {
   id: number;
@@ -8,6 +11,37 @@ export type ImpulseSnapshot = {
   eye: number[];    // °/s
   gain: number;
 };
+
+/** Subconjuntos para iterar / filtrar. */
+export const REPORT_HORIZONTAL_SIDES: Side[] = ['LL', 'RL'];
+export const REPORT_VERTICAL_SIDES: Side[] = ['LA', 'RP', 'RA', 'LP'];
+export const REPORT_ALL_SIDES: Side[] = [...REPORT_HORIZONTAL_SIDES, ...REPORT_VERTICAL_SIDES];
+
+/** Etiqueta humana por canal (espejo de `CHANNEL_LABELS` en scenario). */
+export const SIDE_LABELS: Record<Side, string> = {
+  LL: 'Lateral izq.',
+  RL: 'Lateral der.',
+  LA: 'Anterior izq.',
+  RP: 'Posterior der.',
+  RA: 'Anterior der.',
+  LP: 'Posterior izq.',
+};
+
+/** Color CSS por canal. Horizontales usan los tokens existentes; verticales
+ * comparten color por lado (izq vs der) para mantener consistencia visual. */
+export const SIDE_COLOR: Record<Side, string> = {
+  LL: 'var(--side-ll)',
+  RL: 'var(--side-rl)',
+  LA: 'var(--side-ll)',
+  LP: 'var(--side-ll)',
+  RA: 'var(--side-rl)',
+  RP: 'var(--side-rl)',
+};
+
+/** Signo del eje X para el plot: izquierdos → -1, derechos → +1. */
+export function sideFlip(s: Side): -1 | 1 {
+  return s.startsWith('L') ? -1 : 1;
+}
 
 export type Findings = {
   normal: boolean;
@@ -57,10 +91,22 @@ export type Report = {
 
   // snapshot examen
   impulses: ImpulseSnapshot[];
+  // Horizontales (siempre presentes; informes pre-#13 sólo tenían éstos).
   gainLL: number;
   gainRL: number;
   countLL: number;
   countRL: number;
+  // Verticales (introducidos en #13). En informes legacy se completan con 0
+  // al cargar — ver `normalizeReport` más abajo. Los consumidores deben
+  // tratar count=0 como "sin datos" y mostrar "—".
+  gainLA: number;
+  gainRP: number;
+  gainRA: number;
+  gainLP: number;
+  countLA: number;
+  countRP: number;
+  countRA: number;
+  countLP: number;
 
   // diagnóstico
   findings: Findings;
@@ -79,6 +125,25 @@ import { storage } from './storage';
 const REPORTS_DIR = 'informes/simulacion';
 const LEGACY_DIR = 'reports';
 const LEGACY_KEY = 'simhit:reports';
+
+/**
+ * Rellena con 0 los campos verticales que un informe legacy no trae. No
+ * reescribe disco automáticamente: si el usuario edita y guarda, queda
+ * actualizado en el próximo `upsert`.
+ */
+export function normalizeReport(r: Report): Report {
+  // `as any` porque los Report legacy no declaran las claves verticales.
+  const raw = r as Partial<Report> & Record<string, unknown>;
+  if (typeof raw.gainLA !== 'number') (r as Report).gainLA = 0;
+  if (typeof raw.gainRP !== 'number') (r as Report).gainRP = 0;
+  if (typeof raw.gainRA !== 'number') (r as Report).gainRA = 0;
+  if (typeof raw.gainLP !== 'number') (r as Report).gainLP = 0;
+  if (typeof raw.countLA !== 'number') (r as Report).countLA = 0;
+  if (typeof raw.countRP !== 'number') (r as Report).countRP = 0;
+  if (typeof raw.countRA !== 'number') (r as Report).countRA = 0;
+  if (typeof raw.countLP !== 'number') (r as Report).countLP = 0;
+  return r;
+}
 
 export function emptyFindings(): Findings {
   return {
@@ -118,7 +183,7 @@ class ReportStore {
     const items: Report[] = [];
     for (const fn of (await storage.list(REPORTS_DIR)).filter((n) => n.endsWith('.json'))) {
       const r = await storage.readJson<Report>(`${REPORTS_DIR}/${fn}`);
-      if (r) items.push(r);
+      if (r) items.push(normalizeReport(r));
     }
     this.list = items.sort((a, b) => b.date - a.date);
     this.loaded = true;

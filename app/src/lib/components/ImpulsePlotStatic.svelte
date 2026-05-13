@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ImpulseSnapshot, Side } from '$lib/report.svelte';
+  import { SIDE_COLOR, sideFlip, type ImpulseSnapshot, type Side } from '$lib/report.svelte';
   let { side, impulses }: { side: Side; impulses: ImpulseSnapshot[] } = $props();
 
   const W = 320, H = 180;
@@ -7,8 +7,8 @@
   const PAD = { l: 32, r: 8, t: 8, b: 22 };
   const PW = W - PAD.l - PAD.r;
   const PH = H - PAD.t - PAD.b;
-  let flip = $derived(side === 'LL' ? -1 : 1);
-  let sideColor = $derived(side === 'LL' ? 'var(--side-ll)' : 'var(--side-rl)');
+  let flip = $derived(sideFlip(side));
+  let sideColor = $derived(SIDE_COLOR[side]);
 
   function xScale(t: number) { return PAD.l + ((t - T_MIN) / (T_MAX - T_MIN)) * PW; }
   function yScale(v: number) { return PAD.t + PH - ((v + V_MAX) / (2 * V_MAX)) * PH; }
