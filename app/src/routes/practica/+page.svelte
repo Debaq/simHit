@@ -26,11 +26,23 @@
     sim.disconnect();
   });
 
+  // Banner de pose inicial inválida: dura ~3.5 s tras un impulso con
+  // verdict.invalidPose. Extrae la razón específica del detector pose-initial.
+  let poseBannerUntil = $state(0);
+  let poseBannerMsg = $state('');
+  let lastSeenVerdictId = -1;
+
   // Listener: cada vez que el sim emite un impulso, alimentar la práctica.
   $effect(() => {
     const imp = sim.lastImpulse;
     const ver = sim.lastVerdict;
     if (!imp || !ver) return;
+    if (imp.id !== lastSeenVerdictId && ver.invalidPose) {
+      const poseRes = ver.detectorResults.find((r) => r.id === 'pose-initial');
+      poseBannerMsg = `Ajusta la posición inicial — ${poseRes?.message ?? 'pose fuera de objetivo'}`;
+      poseBannerUntil = Date.now() + 3500;
+    }
+    lastSeenVerdictId = imp.id;
     practice.consumeImpulse(ver, imp.side, imp.id, imp);
   });
 
@@ -97,6 +109,7 @@
   let banner = $derived(
     practice.variant === 'multi' && transitionUntil > nowMs && transitionMsg !== '',
   );
+  let poseBanner = $derived(poseBannerUntil > nowMs && poseBannerMsg !== '');
   let remaining = $derived(practice.remainingByPreset);
   let recent = $derived(practice.attempts.slice().reverse());
   let selectedTs = $state<number | null>(null);
@@ -339,6 +352,12 @@
             <div class="plane-banner">
               <span class="plane-icon">🧭</span>
               <span class="plane-msg">{transitionMsg}</span>
+            </div>
+          {/if}
+          {#if poseBanner}
+            <div class="pose-banner">
+              <span class="pose-icon">⚠</span>
+              <span class="pose-msg">{poseBannerMsg}</span>
             </div>
           {/if}
         </div>
@@ -767,6 +786,16 @@
     from { opacity: 0; transform: translateY(-4px); }
     to   { opacity: 1; transform: translateY(0); }
   }
+  .pose-banner {
+    margin-top: 8px;
+    padding: 10px 14px;
+    background: #b91c1c; color: white;
+    border-radius: var(--radius-sm);
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px; font-weight: 700;
+    animation: plane-banner-in 220ms ease-out;
+  }
+  .pose-banner .pose-icon { font-size: 18px; }
 
   .start { display: flex; flex-direction: column; gap: 12px; }
   .start .muted { color: var(--text-muted); font-size: 13px; margin: 0; }
