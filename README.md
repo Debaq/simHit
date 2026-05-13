@@ -1,6 +1,6 @@
 # SimHIT — Simulador para enseñar el Head Impulse Test (vHIT)
 
-**Plataforma educativa abierta · v2026.05**
+**Plataforma educativa abierta · v2026.5.0**
 
 SimHIT es un simulador completo para enseñar y entrenar el Head Impulse Test asistido por video (vHIT). Las **gafas SimHIT replican el equipo clínico real**: mismo peso, misma forma, mismo sistema de ajuste y los mismos sensores de movimiento. La única pieza que falta respecto a un vHIT comercial es la cámara que filma el ojo del paciente — y esa ausencia es deliberada, porque el ojo lo aporta el paciente virtual del software.
 
