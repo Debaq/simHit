@@ -3,9 +3,10 @@
   import uPlot from 'uplot';
   import 'uplot/dist/uPlot.min.css';
   import { sim } from '$lib/simulator.svelte';
+  import { acceptance } from '$lib/acceptance.svelte';
 
-  let { title = 'Tiempo real', hideEye = false }:
-    { title?: string; hideEye?: boolean } = $props();
+  let { title = 'Tiempo real', hideEye = false, showPeakBands = false }:
+    { title?: string; hideEye?: boolean; showPeakBands?: boolean } = $props();
   let host: HTMLDivElement;
   let container: HTMLDivElement;
   let plot: uPlot | undefined;
@@ -58,6 +59,59 @@
           ],
       cursor: { drag: { x: false, y: false }, points: { show: false } },
       legend: { show: false },
+      hooks: {
+        drawClear: showPeakBands
+          ? [
+              (u) => {
+                const cfg = acceptance.active;
+                if (!cfg) return;
+                const peakMin = cfg.peakMin;
+                const peakMax = cfg.peakMax;
+                const ctx = u.ctx;
+                const left = u.bbox.left;
+                const top = u.bbox.top;
+                const w = u.bbox.width;
+                const h = u.bbox.height;
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(left, top, w, h);
+                ctx.clip();
+
+                // Bandas verdes (zona ok) y líneas dashed
+                ctx.fillStyle = 'rgba(34,197,94,0.08)';
+                const yA = u.valToPos(peakMax, 'y', true);
+                const yB = u.valToPos(peakMin, 'y', true);
+                ctx.fillRect(left, yA, w, yB - yA);
+                const yC = u.valToPos(-peakMin, 'y', true);
+                const yD = u.valToPos(-peakMax, 'y', true);
+                ctx.fillRect(left, yC, w, yD - yC);
+
+                ctx.strokeStyle = 'rgba(34,197,94,0.55)';
+                ctx.setLineDash([4, 4]);
+                ctx.lineWidth = 1;
+                for (const v of [peakMin, peakMax, -peakMin, -peakMax]) {
+                  const y = u.valToPos(v, 'y', true);
+                  ctx.beginPath();
+                  ctx.moveTo(left, y);
+                  ctx.lineTo(left + w, y);
+                  ctx.stroke();
+                }
+                ctx.setLineDash([]);
+
+                // Etiquetas
+                ctx.fillStyle = 'rgb(22,163,74)';
+                ctx.font = '10px ui-monospace, monospace';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(`+${peakMax} °/s`, left + 4, u.valToPos(peakMax, 'y', true) - 2);
+                ctx.fillText(`+${peakMin} °/s`, left + 4, u.valToPos(peakMin, 'y', true) - 2);
+                ctx.textBaseline = 'top';
+                ctx.fillText(`-${peakMin} °/s`, left + 4, u.valToPos(-peakMin, 'y', true) + 2);
+                ctx.fillText(`-${peakMax} °/s`, left + 4, u.valToPos(-peakMax, 'y', true) + 2);
+                ctx.restore();
+              },
+            ]
+          : [],
+      },
     };
 
     const buildData = () => (hideEye

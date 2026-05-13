@@ -4,7 +4,7 @@
 // totales o aciertos por preset).
 
 import { acceptance } from '$lib/acceptance.svelte';
-import { sim, type Verdict } from '$lib/simulator.svelte';
+import { sim, type Verdict, type Impulse } from '$lib/simulator.svelte';
 import type { Escenario } from '$lib/bundle.svelte';
 
 export interface SeqItem {
@@ -24,6 +24,14 @@ export interface Attempt {
   amp: number;
   reasons: string[];
   ts: number;
+  /** Impulso ID del sim (correlación con traza). */
+  impulseId: number;
+  /** Tiempo en ms (relativo al inicio del impulso). */
+  traceT: number[];
+  /** Velocidad angular de la cabeza (°/s). */
+  traceHead: number[];
+  /** Velocidad angular del ojo (°/s) para análisis de gain/saccade. */
+  traceEye: number[];
 }
 
 export interface PresetStats {
@@ -75,6 +83,8 @@ class PracticeStore {
   attempts = $state<Attempt[]>([]);
   startedMs = $state(0);
   endedMs = $state(0);
+  /** Nombre del practicante para informe/PDF. */
+  practitioner = $state('');
 
   private prevAcceptanceId: string | null = null;
   private lastSeenImpulseId = 0;
@@ -145,10 +155,12 @@ class PracticeStore {
     return r;
   }
 
-  start(b: Escenario) {
+  start(b: Escenario, practitioner = '') {
     if (b.kind === 'clinico') return;
     const goals = (b.goals ?? []).filter((g) => g.count > 0);
     if (goals.length === 0) return;
+
+    this.practitioner = practitioner.trim();
 
     this.bundleId = b.id;
     this.variant = b.kind === 'practica-vert' ? 'vert' : 'horiz';
@@ -221,7 +233,7 @@ class PracticeStore {
     }
   }
 
-  consumeImpulse(verdict: Verdict, side: 'LL' | 'RL', impulseId: number) {
+  consumeImpulse(verdict: Verdict, side: 'LL' | 'RL', impulseId: number, impulse?: Impulse | null) {
     if (!this.active || this.paused || this.done) return;
     if (impulseId <= this.lastSeenImpulseId) return;
     const cur = this.current;
@@ -234,6 +246,12 @@ class PracticeStore {
     // Solo marcar consumido si el impulso pasó los filtros y se va a procesar.
     this.lastSeenImpulseId = impulseId;
 
+    const imp = impulse ?? sim.lastImpulse;
+    const t0 = imp && imp.t.length > 0 ? imp.t[0] : 0;
+    const traceT: number[] = imp ? Array.from(imp.t, (v) => v - t0) : [];
+    const traceHead: number[] = imp ? Array.from(imp.head) : [];
+    const traceEye: number[] = imp ? Array.from(imp.eye) : [];
+
     this.attempts = [...this.attempts, {
       itemIdx: cur.idx,
       acceptanceId: cur.acceptanceId,
@@ -245,6 +263,10 @@ class PracticeStore {
       amp: verdict.amp,
       reasons: verdict.reasons.slice(),
       ts: Date.now(),
+      impulseId,
+      traceT,
+      traceHead,
+      traceEye,
     }];
 
     if (this.mode === 'attempts') {
@@ -287,6 +309,10 @@ class PracticeStore {
       peak: 0, gain: 0, durMs: 0, amp: 0,
       reasons: ['saltado por docente'],
       ts: Date.now(),
+      impulseId: 0,
+      traceT: [],
+      traceHead: [],
+      traceEye: [],
     }];
     if (this.mode === 'attempts') {
       this.cursor++;

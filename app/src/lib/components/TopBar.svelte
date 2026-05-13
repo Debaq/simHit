@@ -226,15 +226,17 @@
       </button>
     {/if}
 
-    <button
-      class="cam"
-      class:on={sim.cameraOn}
-      onclick={toggleCamera}
-      title="Encender/apagar cámara del paciente"
-    >
-      <span class="ic">📷</span>
-      Cámara <b>{sim.cameraOn ? 'ON' : 'OFF'}</b>
-    </button>
+    {#if path !== '/practica'}
+      <button
+        class="cam"
+        class:on={sim.cameraOn}
+        onclick={toggleCamera}
+        title="Encender/apagar cámara del paciente"
+      >
+        <span class="ic">📷</span>
+        Cámara <b>{sim.cameraOn ? 'ON' : 'OFF'}</b>
+      </button>
+    {/if}
 
     <div class="serial">
       <select bind:value={selectedPort} disabled={serial.connected || serial.ports.length === 0} title="Puerto serie">

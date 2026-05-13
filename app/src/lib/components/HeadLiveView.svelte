@@ -3,6 +3,8 @@
   import { serial, type Axis, type AxesConfig } from '$lib/serial.svelte';
   import { acceptance } from '$lib/acceptance.svelte';
 
+  let { impulseLayout = 'compact' as 'compact' | 'prominent' } = $props();
+
   let showAxes = $state(false);
   const AXES: Axis[] = ['x', 'y', 'z'];
   type Group = 'pose' | 'gyro';
@@ -326,32 +328,100 @@
   </div>
 
   <!-- Panel ÚLTIMO IMPULSO -->
-  <div class="panel impulse" class:ok={verdict?.ok} class:bad={verdict && !verdict.ok}>
-    <div class="panel-title impulse-title">
-      <span>Último impulso</span>
-      {#if last}
-        <span class="side-chip {last.side === 'LL' ? 'll' : 'rl'}">{last.side}</span>
-        <span class="muted small">#{last.id}</span>
-      {/if}
-      {#if verdict}
-        <span class="level-chip" title="Nivel de aceptación activo">{verdict.levelName}</span>
-        <span class="badge {verdict.ok ? 'ok' : 'bad'}">{verdict.ok ? '✓' : '✗'}</span>
-      {/if}
-    </div>
-
-    {#if !last}
-      <div class="empty">Sin impulsos aún.</div>
-    {:else if verdict}
-      <div class="imp-row">
-        {#each verdict.checks as c (c.id)}
-          {@const dec = c.id === 'gain' ? 2 : c.id === 'amp' ? 1 : 0}
-          <div class="imp-cell" class:bad={!c.ok} title={`rango ${c.min}–${c.max}${c.unit ? ' ' + c.unit : ''}`}>
-            <span class="ro-lab">{c.label}</span>
-            <b>{c.value.toFixed(dec)}{#if c.unit}<span class="unit">{c.unit}</span>{/if}</b>
-            <span class="range muted">[{c.min}–{c.max}]</span>
-          </div>
-        {/each}
+  <div
+    class="panel impulse"
+    class:ok={verdict?.ok}
+    class:bad={verdict && !verdict.ok}
+    class:prominent={impulseLayout === 'prominent'}
+  >
+    {#if impulseLayout === 'prominent'}
+      <div class="panel-title impulse-title">
+        <span>Último impulso</span>
+        {#if last}
+          <span class="side-chip {last.side === 'LL' ? 'll' : 'rl'}">{last.side}</span>
+          <span class="muted small">#{last.id}</span>
+        {/if}
+        {#if verdict}
+          <span class="level-chip" title="Nivel de aceptación activo">{verdict.levelName}</span>
+        {/if}
       </div>
+
+      {#if !last}
+        <div class="empty big">Aún sin impulsos. Realiza un impulso para ver la retroalimentación.</div>
+      {:else if verdict}
+        <div class="prom-head">
+          <div class="prom-badge {verdict.ok ? 'ok' : 'bad'}">{verdict.ok ? '✓' : '✗'}</div>
+          <div class="prom-meta">
+            <div class="prom-title">{verdict.ok ? 'Impulso correcto' : 'Impulso fuera de rango'}</div>
+            <div class="prom-sub">
+              Lado {last.side === 'LL' ? 'Izquierdo' : 'Derecho'} · {verdict.levelName}
+            </div>
+          </div>
+        </div>
+
+        <div class="prom-tiles">
+          {#each verdict.checks as c (c.id)}
+            {@const dec = c.id === 'gain' ? 2 : c.id === 'amp' ? 1 : 0}
+            {@const hint = c.ok
+              ? 'OK'
+              : c.id === 'amp'
+                ? 'más corto'
+                : c.id === 'peak'
+                  ? (c.value < c.min ? 'más intenso' : 'menos intenso')
+                  : c.id === 'dur'
+                    ? (c.value < c.min ? 'más lento' : 'más rápido')
+                    : (c.value < c.min ? 'más amplio' : 'menos amplio')}
+            <div class="prom-tile" class:ok={c.ok} class:bad={!c.ok}>
+              <div class="prom-tile-lab">{c.label}</div>
+              <div class="prom-tile-val">
+                {c.value.toFixed(dec)}{#if c.unit}<span class="prom-tile-unit">{c.unit}</span>{/if}
+              </div>
+              <div class="prom-tile-rng">
+                {c.id === 'amp' ? `≤ ${c.max}${c.unit}` : `${c.min}–${c.max}${c.unit ? ' ' + c.unit : ''}`}
+              </div>
+              <div class="prom-tile-hint">{hint}</div>
+            </div>
+          {/each}
+        </div>
+
+        {#if !verdict.ok && verdict.reasons.length > 0}
+          <div class="prom-why">
+            <div class="prom-why-lab">¿Qué faltó?</div>
+            <ul class="prom-why-list">
+              {#each verdict.reasons as r}
+                <li>{r}</li>
+              {/each}
+            </ul>
+          </div>
+        {/if}
+      {/if}
+    {:else}
+      <div class="panel-title impulse-title">
+        <span>Último impulso</span>
+        {#if last}
+          <span class="side-chip {last.side === 'LL' ? 'll' : 'rl'}">{last.side}</span>
+          <span class="muted small">#{last.id}</span>
+        {/if}
+        {#if verdict}
+          <span class="level-chip" title="Nivel de aceptación activo">{verdict.levelName}</span>
+          <span class="badge {verdict.ok ? 'ok' : 'bad'}">{verdict.ok ? '✓' : '✗'}</span>
+        {/if}
+      </div>
+
+      {#if !last}
+        <div class="empty">Sin impulsos aún.</div>
+      {:else if verdict}
+        <div class="imp-row">
+          {#each verdict.checks as c (c.id)}
+            {@const dec = c.id === 'gain' ? 2 : c.id === 'amp' ? 1 : 0}
+            <div class="imp-cell" class:bad={!c.ok} title={`rango ${c.min}–${c.max}${c.unit ? ' ' + c.unit : ''}`}>
+              <span class="ro-lab">{c.label}</span>
+              <b>{c.value.toFixed(dec)}{#if c.unit}<span class="unit">{c.unit}</span>{/if}</b>
+              <span class="range muted">[{c.min}–{c.max}]</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
     {/if}
   </div>
 
@@ -481,6 +551,116 @@
   .imp-cell .unit { font-size: 10px; color: var(--text-muted); margin-left: 1px; }
   .imp-cell .range { font-size: 9px; }
   .imp-row { flex-wrap: wrap; }
+
+  /* Prominent layout (modo práctica) — crece para ocupar la altura disponible */
+  .impulse.prominent {
+    padding: 10px 12px; border-width: 2px;
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column;
+  }
+  .impulse.prominent.ok { background: #ecfdf5; }
+  .impulse.prominent.bad { background: #fef2f2; }
+  .impulse.prominent .panel-title { margin-bottom: 6px; font-size: 11px; }
+  .empty.big {
+    font-size: 14px; color: var(--text-muted); text-align: center;
+    flex: 1; display: flex; align-items: center; justify-content: center;
+  }
+
+  /* Una sola fila: badge + meta + tiles + razones a la derecha cuando falla */
+  .prom-head {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 6px;
+  }
+  .prom-badge {
+    width: 36px; height: 36px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 800; color: white; flex-shrink: 0;
+    line-height: 1;
+  }
+  .prom-badge.ok { background: var(--success); }
+  .prom-badge.bad { background: var(--danger); }
+  .prom-title { font-size: 15px; font-weight: 700; line-height: 1.1; }
+  .impulse.prominent.ok .prom-title { color: var(--success); }
+  .impulse.prominent.bad .prom-title { color: var(--danger); }
+  .prom-sub { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+  .prom-tiles {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+    margin-bottom: 8px;
+    flex: 1; min-height: 0;
+  }
+  .prom-tile {
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    border: 2px solid;
+    background: var(--surface);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto 1fr auto;
+    column-gap: 6px;
+    align-items: center;
+    min-height: 0;
+  }
+  .prom-tile.ok { border-color: var(--success); }
+  .prom-tile.bad { border-color: var(--danger); }
+  .prom-tile-lab {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--text-muted); font-weight: 700;
+    grid-column: 1; grid-row: 1;
+  }
+  .prom-tile-rng {
+    font-size: 10px; color: var(--text-muted); font-family: ui-monospace, monospace;
+    grid-column: 2; grid-row: 1; text-align: right;
+  }
+  .prom-tile-val {
+    font-family: ui-monospace, monospace;
+    font-size: clamp(22px, 4vh, 44px); font-weight: 800; line-height: 1;
+    grid-column: 1 / -1; grid-row: 2;
+    align-self: center; text-align: center;
+  }
+  .prom-tile.ok .prom-tile-val { color: var(--success); }
+  .prom-tile.bad .prom-tile-val { color: var(--danger); }
+  .prom-tile-unit { font-size: 10px; font-weight: 500; color: var(--text-muted); margin-left: 1px; }
+  .prom-tile-hint {
+    font-size: 14px; font-weight: 800;
+    grid-column: 1 / -1; grid-row: 3; text-align: center;
+    white-space: normal; line-height: 1.2;
+    padding: 4px 6px; border-radius: var(--radius-sm);
+    margin-top: 4px;
+  }
+  .prom-tile.ok .prom-tile-hint { background: #dcfce7; }
+  .prom-tile.bad .prom-tile-hint { background: #fee2e2; }
+  .prom-tile.ok .prom-tile-hint { color: var(--success); }
+  .prom-tile.bad .prom-tile-hint { color: var(--danger); }
+
+  .prom-why {
+    padding: 6px 12px; background: var(--surface);
+    border: 2px solid var(--danger); border-radius: var(--radius-sm);
+    display: flex; align-items: center; gap: 12px; flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .prom-why-lab {
+    font-size: 16px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--danger); font-weight: 800; flex-shrink: 0;
+  }
+  .prom-why-list {
+    margin: 0; padding: 0; list-style: none;
+    display: flex !important; flex-direction: row !important;
+    gap: 6px; flex-wrap: wrap; align-items: center;
+  }
+  .prom-why-list li {
+    display: inline-block;
+    font-size: 14px; font-weight: 700; color: var(--danger);
+    line-height: 1.1;
+    padding: 4px 10px;
+    background: #fee2e2;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 900px) {
+    .prom-tiles { grid-template-columns: repeat(2, 1fr); }
+  }
 
   .badge { padding: 1px 8px; border-radius: 999px; font-weight: 700; font-size: 11px; }
   .badge.ok  { background: var(--success); color: white; }
