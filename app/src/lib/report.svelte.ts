@@ -51,6 +51,9 @@ export type Findings = {
   saccades_covert: boolean;
   saccades_overt: boolean;
   artifacts: boolean;
+  // TODO[#13 F8 diag]: ampliar a hipofunción anterior/posterior por lado
+  // (LA/RA/LP/RP) para diagnóstico automático de planos verticales. Por ahora
+  // los counts/gains verticales se exhiben pero no alimentan Findings/Diagnosis.
 };
 
 export type Diagnosis =
