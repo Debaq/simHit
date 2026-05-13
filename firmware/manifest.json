@@ -1,0 +1,18 @@
+{
+  "schema_version": "simhit-fw-manifest-1.0",
+  "latest": {
+    "version": "1.0.0",
+    "channel": "stable",
+    "released_at": "2026-05-13",
+    "notes": "Versión inicial estampada. Añade banner 'SimHit FW x.y.z' al boot y comando VERSION para query post-conexión.",
+    "min_compatible_app": "2026.5.0",
+    "artifacts": [
+      {
+        "board": "esp32-c3-supermini",
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.0.0/simhit-fw-1.0.0-esp32c3.bin",
+        "sha256": null
+      }
+    ]
+  },
+  "history": []
+}

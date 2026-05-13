@@ -124,6 +124,9 @@ class SerialStore {
   // Sensor giroscopio detectado por el firmware en el banner de boot.
   // Null hasta que se reciba la primera línea "Gyro WHO_AM_I ...".
   detectedSensor = $state<DetectedSensor | null>(null);
+  // Versión del firmware (semver) reportada por el banner "SimHit FW x.y.z"
+  // o por la respuesta a "VERSION". Null mientras no se haya recibido.
+  firmwareVersionString = $state<string | null>(null);
   // Cola de muestras gyro desde el último drenado por simulator. Evita
   // pérdidas por bursts USB y jitter del setInterval del tick.
   private gyroQueue: Array<{ x: number; y: number; z: number }> = [];
@@ -307,6 +310,7 @@ class SerialStore {
     this.firmwareVersion = 'unknown';
     this.crcErrors = 0;
     this.detectedSensor = null;
+    this.firmwareVersionString = null;
     try {
       this.sp = new SerialPort({ path, baudRate: FIRMWARE_BAUD });
       await this.sp.open();
@@ -342,6 +346,7 @@ class SerialStore {
     this.buffer = '';
     this.calibrated = false;
     this.detectedSensor = null;
+    this.firmwareVersionString = null;
   }
 
   async sendCommand(cmd: string) {
@@ -392,6 +397,14 @@ class SerialStore {
     if (line === 'SimHit start') {
       this.bootResolve?.();
       return;
+    }
+    // Banner de versión: "SimHit FW 1.0.0" (boot) o "VERSION 1.0.0" (query).
+    {
+      const m = line.match(/^(?:SimHit FW|VERSION)\s+(\d+\.\d+\.\d+(?:[-+][\w.]+)?)\s*$/);
+      if (m) {
+        this.firmwareVersionString = m[1];
+        return;
+      }
     }
     // Banner del firmware: "Gyro WHO_AM_I @0x6B = 0xD7 (L3GD20H)".
     // Capturamos el primer match válido (descarta candidatos sin respuesta).

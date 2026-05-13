@@ -17,7 +17,7 @@
 //            "MAG CAL" | "MAG CLR" | "MAG STATUS"
 //            "LASER ON" | "LASER OFF" | "LASER STATUS"
 //            "FILTER SG" | "FILTER IIR" | "FILTER NONE" | "FILTER STATUS"
-//            "HELLO" | "RESET"
+//            "HELLO" | "VERSION" | "RESET"
 //
 //   El comando FILTER selecciona el método de cálculo de la aceleración
 //   angular y se persiste en NVS (clave "accelFilt"). Default: SG.
@@ -30,6 +30,11 @@
 #include <Adafruit_AHRS.h>
 
 #define SERIAL_BAUD_RATE 460800
+
+// Versión del firmware. Sincronizar con firmware/manifest.json cada vez que se
+// haga un release. El cliente la usa para chequear actualizaciones contra el
+// manifest del repo.
+#define FW_VERSION_STRING "1.0.0"
 
 #define I2C_SDA_PIN 6
 #define I2C_SCL_PIN 7
@@ -300,6 +305,10 @@ void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
   delay(100);
   Serial.println("SimHit configure");
+  // Banner de versión: el cliente lo captura como serial.firmwareVersionString
+  // y lo compara contra firmware/manifest.json para detectar actualizaciones.
+  Serial.print("SimHit FW ");
+  Serial.println(FW_VERSION_STRING);
 
   pinMode(LASER_PIN, OUTPUT);
   digitalWrite(LASER_PIN, LOW);
@@ -516,6 +525,11 @@ void handleCommand(String command) {
     Serial.println(accelFilterName(accelFilter));
   } else if (command == "HELLO") {
     Serial.println("HELLO");
+  } else if (command == "VERSION") {
+    // Respuesta de query explícita. Útil para clientes que se conectan a un
+    // firmware ya inicializado (perdieron el banner de boot).
+    Serial.print("VERSION ");
+    Serial.println(FW_VERSION_STRING);
   } else if (command == "RESET") {
     Serial.println("Reiniciando...");
     delay(10);

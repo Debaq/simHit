@@ -5,6 +5,8 @@
   import { analysis } from '$lib/analysis.svelte';
   import { synthetic } from '$lib/synthetic.svelte';
   import { acceptance } from '$lib/acceptance.svelte';
+  import { firmware } from '$lib/firmware.svelte';
+  import { onMount } from 'svelte';
 
   // Vista de Métricas / Caracterización. La sección "Captura" usa el módulo
   // real (src-tauri/src/metrics/capture.rs). Flash, análisis y perfil siguen
@@ -13,31 +15,12 @@
   type Step = 'flash' | 'detect' | 'capture' | 'analysis' | 'profile';
   let step = $state<Step>('flash');
 
-  // 1) Flash
-  let flashState = $state<'idle' | 'detecting' | 'flashing' | 'done'>('idle');
-  let flashProgress = $state(0);
-  let detectedDevice = $state<{ port: string; chip: string; mac: string } | null>(null);
+  // 1) Firmware — chequeo de versión y actualizaciones. El flasheo real
+  // (espflash + .bin embebido o descargado) es el último componente del
+  // módulo de métricas; por ahora solo detectamos versión y advertimos.
 
-  function mockDetect() {
-    flashState = 'detecting';
-    setTimeout(() => {
-      detectedDevice = { port: '/dev/ttyACM0', chip: 'ESP32-S3', mac: '7C:DF:A1:B2:C3:D4' };
-      flashState = 'idle';
-    }, 800);
-  }
-  function mockFlash() {
-    flashState = 'flashing';
-    flashProgress = 0;
-    const t = setInterval(() => {
-      flashProgress += 7;
-      if (flashProgress >= 100) {
-        flashProgress = 100;
-        clearInterval(t);
-        flashState = 'done';
-        setTimeout(() => { step = 'detect'; }, 600);
-      }
-    }, 120);
-  }
+  // Consultar el manifest al montar la vista. Idempotente.
+  onMount(() => { void firmware.check(false); });
 
   // 2) Identificación del sensor. Datos reales provenientes del banner que
   // el firmware emite en el boot ("Gyro WHO_AM_I @0xXX = 0xYY (Nombre)"),
@@ -59,11 +42,11 @@
     const match = SENSOR_CATALOG.find((c) => c.label === ds.family) ?? null;
     return match ?? { label: ds.name, addr: ds.addr, whoami: ds.whoami, mag: false };
   });
-  // Info del firmware: tomamos lo que el serial detectó. Versión y git_commit
-  // aún no los emite el firmware actual; placeholder hasta que se agreguen.
+  // Info del firmware: prefiere la versión real (banner "SimHit FW x.y.z");
+  // si no llegó, cae al formato de trama como heurística.
   let firmwareInfo = $derived({
-    version: serial.firmwareVersion === 'extended' ? '1.2.0' : '1.0.0',
-    git: serial.firmwareVersion === 'extended' ? 'extended' : 'legacy',
+    version: serial.firmwareVersionString ?? (serial.firmwareVersion === 'extended' ? '1.2.0' : '1.0.0'),
+    git: serial.firmwareVersion,
     sample_rate: 200,
   });
 
@@ -365,55 +348,106 @@
       {/each}
     </nav>
 
-    <!-- ─────────────── STEP 1: FLASH ─────────────── -->
+    <!-- ─────────────── STEP 1: FIRMWARE ─────────────── -->
     {#if step === 'flash'}
       <section class="panel">
         <header class="panel-h">
-          <h2>Flasheo del firmware</h2>
-          <p class="lead">Detectar ESP32 y escribir el firmware oficial de SimHIT. Cero terminal, cero esptool.</p>
+          <h2>Firmware</h2>
+          <p class="lead">Versión instalada en el dispositivo y chequeo de actualizaciones publicadas en el repo.</p>
         </header>
 
-        <div class="card flash-card">
-          {#if !detectedDevice}
-            <div class="empty">
-              <div class="empty-ic">⚡</div>
-              <div class="empty-t">Ningún dispositivo detectado</div>
-              <p class="empty-d">Conectar la gafa por USB-C y presionar el botón.</p>
-              <button class="primary" onclick={mockDetect} disabled={flashState === 'detecting'}>
-                {flashState === 'detecting' ? 'Buscando…' : 'Detectar ESP32'}
-              </button>
-            </div>
-          {:else}
-            <div class="dev-row">
-              <div class="dev-cell"><span>Puerto</span><b>{detectedDevice.port}</b></div>
-              <div class="dev-cell"><span>Chip</span><b>{detectedDevice.chip}</b></div>
-              <div class="dev-cell"><span>MAC</span><b>{detectedDevice.mac}</b></div>
-              <div class="dev-cell"><span>Firmware</span><b class="muted">no flasheado</b></div>
-            </div>
-
-            {#if flashState === 'flashing'}
-              <div class="flash-prog">
-                <div class="bar"><div class="bar-fill" style:width="{flashProgress}%"></div></div>
-                <div class="bar-lab">Escribiendo… {flashProgress}%</div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-h">Versión instalada</div>
+            {#if !serial.connected}
+              <div class="empty small">
+                <div class="empty-ic">🔌</div>
+                <p class="empty-d">Conecte SimHIT para leer la versión del firmware.</p>
               </div>
-            {:else if flashState === 'done'}
-              <div class="ok-msg">
-                <span class="ok-ic">✓</span>
-                Firmware <b>v{firmwareInfo.version}</b> flasheado correctamente.
+            {:else if serial.firmwareVersionString}
+              <div class="sensor-info">
+                <div class="sensor-name">v{serial.firmwareVersionString}</div>
+                <dl class="kv">
+                  <dt>Formato de trama</dt><dd>{serial.firmwareVersion}</dd>
+                  <dt>Puerto</dt><dd><code>{serial.portPath ?? '—'}</code></dd>
+                  <dt>Errores CRC</dt><dd>{serial.crcErrors}</dd>
+                </dl>
+                <button class="block" onclick={() => serial.sendCommand('VERSION')} title="Consultar versión al firmware">
+                  ↻ Re-consultar VERSION
+                </button>
               </div>
             {:else}
-              <div class="actions-row">
-                <button onclick={mockDetect}>↻ Re-detectar</button>
-                <button class="primary" onclick={mockFlash}>Flashear firmware</button>
+              <div class="empty small">
+                <div class="empty-ic">📡</div>
+                <div class="empty-t">Sin versión recibida</div>
+                <p class="empty-d">El firmware actual puede ser anterior a v1.0.0 (no emite banner). Use VERSION para consultar:</p>
+                <button class="primary" onclick={() => serial.sendCommand('VERSION')}>Enviar VERSION</button>
               </div>
             {/if}
-          {/if}
+          </div>
+
+          <div class="card">
+            <div class="card-h">Actualizaciones</div>
+            {#if firmware.checking}
+              <div class="empty small">
+                <div class="spinner-sm"></div>
+                <p class="empty-d">Consultando manifest…</p>
+              </div>
+            {:else if firmware.lastError}
+              <div class="warn-msg" style="margin-bottom:10px">
+                <span class="warn-ic">!</span>
+                <div><b>No se pudo verificar.</b><div>{firmware.lastError}</div></div>
+              </div>
+              <button class="primary block" onclick={() => firmware.check(true)}>Reintentar</button>
+            {:else if !firmware.manifest}
+              <div class="empty small">
+                <button class="primary" onclick={() => firmware.check(true)}>Verificar actualizaciones</button>
+              </div>
+            {:else}
+              {@const m = firmware.manifest.latest}
+              {@const st = firmware.status}
+              <div class="update-box" class:up={st === 'up-to-date'} class:avail={st === 'update-available'} class:dev={st === 'newer-than-remote'}>
+                <div class="update-h">
+                  {#if st === 'up-to-date'}<span class="ic">✓</span><b>Firmware al día</b>
+                  {:else if st === 'update-available'}<span class="ic">↑</span><b>Actualización disponible</b>
+                  {:else if st === 'newer-than-remote'}<span class="ic">⚙</span><b>Build de desarrollo</b>
+                  {:else}<span class="ic">?</span><b>Sin información</b>
+                  {/if}
+                </div>
+                <dl class="kv compact">
+                  <dt>Última publicada</dt><dd><b>v{m.version}</b> ({m.channel})</dd>
+                  <dt>Fecha</dt><dd>{m.released_at}</dd>
+                  <dt>App mínima</dt><dd>{m.min_compatible_app}</dd>
+                  {#if firmware.lastChecked}
+                    <dt>Verificado</dt><dd>{firmware.lastChecked.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</dd>
+                  {/if}
+                </dl>
+                {#if m.notes}<p class="note inline" style="margin-top:8px">{m.notes}</p>{/if}
+              </div>
+              <div class="actions-row" style="margin-top:10px">
+                <button onclick={() => firmware.check(true)}>↻ Refrescar manifest</button>
+                {#if firmware.status === 'update-available'}
+                  <button class="primary" disabled title="Flasheo automático llegará con espflash">⬇ Flashear v{m.version}</button>
+                {/if}
+              </div>
+            {/if}
+          </div>
         </div>
 
         <div class="note">
-          Firmware único con autodetección del sensor por I²C (BNO055, ICM-42688, MPU9250, L3GD20H).
-          Se intercambian sensores por zócalo sin reflashear.
+          El flasheo automático (espflash + binario embebido) está planificado. Por ahora la actualización es manual:
+          descargá el <code>.bin</code> desde la sección Releases y usá <code>esptool.py</code> o <code>arduino-cli</code> hasta que se integre el módulo de flash.
         </div>
+
+        {#if serial.firmwareVersionString && firmware.manifest && firmware.status === 'update-available'}
+          <div class="actions-row right">
+            <button class="primary" onclick={() => (step = 'detect')}>Continuar igual →</button>
+          </div>
+        {:else if serial.firmwareVersionString}
+          <div class="actions-row right">
+            <button class="primary" onclick={() => (step = 'detect')}>Continuar a sensor →</button>
+          </div>
+        {/if}
       </section>
 
     <!-- ─────────────── STEP 2: SENSOR DETECT ─────────────── -->
@@ -1333,6 +1367,29 @@
   .verdict-badge.bad { background: var(--danger); }
   .verdict-badge.warn { background: var(--primary); }
   .verdict-badge.pending { background: var(--text-muted); }
+
+  .update-box {
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    border-left: 4px solid var(--text-muted);
+  }
+  .update-box.up    { border-left-color: var(--success); background: rgba(22,163,74,.06); }
+  .update-box.avail { border-left-color: var(--primary); background: var(--primary-soft); }
+  .update-box.dev   { border-left-color: var(--accent);  background: var(--accent-soft); }
+  .update-h {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px; font-size: 14px;
+  }
+  .update-h .ic {
+    width: 24px; height: 24px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--text-muted); color: white;
+    font-weight: 700; font-size: 14px;
+  }
+  .update-box.up    .update-h .ic { background: var(--success); }
+  .update-box.avail .update-h .ic { background: var(--primary); }
+  .update-box.dev   .update-h .ic { background: var(--accent); }
 
   /* Bloque exportable a PDF */
   .profile-export {
