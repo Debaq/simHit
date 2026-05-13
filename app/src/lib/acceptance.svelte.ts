@@ -63,13 +63,40 @@ const BUILTIN: AcceptancePreset[] = [
 const LS_PRESETS = 'simhit:acceptance:presets';
 const LS_ACTIVE = 'simhit:acceptance:active';
 
+/** Normaliza un preset legado: conserva solo los campos del schema actual.
+ *  Campos obsoletos como `ampMin`/`ampMax` (absorbidos por `yawTol`/`pitchTol`)
+ *  se descartan. */
+function sanitizePreset(p: any): AcceptancePreset | null {
+  if (!p || typeof p !== 'object' || !p.id || p.builtin) return null;
+  return {
+    id: String(p.id),
+    name: String(p.name ?? 'Sin nombre'),
+    builtin: false,
+    yawTol: Number(p.yawTol),
+    pitchTol: Number(p.pitchTol),
+    rollTol: Number(p.rollTol),
+    peakMin: Number(p.peakMin),
+    peakMax: Number(p.peakMax),
+    gainMin: Number(p.gainMin),
+    gainMax: Number(p.gainMax),
+    durMinMs: Number(p.durMinMs),
+    durMaxMs: Number(p.durMaxMs),
+  };
+}
+
 function loadCustom(): AcceptancePreset[] {
   if (typeof localStorage === 'undefined') return [];
   try {
     const raw = localStorage.getItem(LS_PRESETS);
     if (!raw) return [];
-    const arr = JSON.parse(raw) as AcceptancePreset[];
-    return arr.filter((p) => p && !p.builtin);
+    const arr = JSON.parse(raw) as unknown[];
+    if (!Array.isArray(arr)) return [];
+    const clean = arr.map(sanitizePreset).filter((p): p is AcceptancePreset => p !== null);
+    const needsRewrite = JSON.stringify(clean) !== raw;
+    if (needsRewrite) {
+      try { localStorage.setItem(LS_PRESETS, JSON.stringify(clean)); } catch {}
+    }
+    return clean;
   } catch { return []; }
 }
 
