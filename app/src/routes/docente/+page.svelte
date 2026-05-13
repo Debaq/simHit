@@ -381,19 +381,20 @@
               <a class="edit-link" href="/docente/dificultad">Editar →</a>
             </div>
             <select value={active.acceptanceId} onchange={(e) => setAcceptance((e.currentTarget as HTMLSelectElement).value)}>
-              <optgroup label="📚 Predefinidos">
-                {#each acceptance.all.filter((p) => p.builtin) as p (p.id)}
+              <optgroup label="📚 Predefinidos (clínicos)">
+                {#each acceptance.all.filter((p) => p.builtin && p.clinicallyValid) as p (p.id)}
                   <option value={p.id}>{p.name}</option>
                 {/each}
               </optgroup>
-              {#if acceptance.all.some((p) => !p.builtin)}
-                <optgroup label="Mis niveles">
-                  {#each acceptance.all.filter((p) => !p.builtin) as p (p.id)}
+              {#if acceptance.all.some((p) => !p.builtin && p.clinicallyValid)}
+                <optgroup label="Mis niveles (clínicos)">
+                  {#each acceptance.all.filter((p) => !p.builtin && p.clinicallyValid) as p (p.id)}
                     <option value={p.id}>{p.name}</option>
                   {/each}
                 </optgroup>
               {/if}
             </select>
+            <p class="hint-line">Solo se listan presets aptos para examen clínico. Para los niveles formativos (inicial/básico) usa el modo práctica.</p>
             {#if acceptanceActive}
               <div class="summary-grid">
                 <div><span>Amplitud</span> ±{acceptanceActive.yawTol}° H / ±{acceptanceActive.pitchTol}° V / ±{acceptanceActive.rollTol}° R</div>
