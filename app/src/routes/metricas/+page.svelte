@@ -3,6 +3,8 @@
   import { serial } from '$lib/serial.svelte';
   import { capture } from '$lib/capture.svelte';
   import { analysis } from '$lib/analysis.svelte';
+  import { synthetic } from '$lib/synthetic.svelte';
+  import { acceptance } from '$lib/acceptance.svelte';
 
   // Vista de Métricas / Caracterización. La sección "Captura" usa el módulo
   // real (src-tauri/src/metrics/capture.rs). Flash, análisis y perfil siguen
@@ -203,6 +205,7 @@
       metrics: {
         sampling: analysis.sampling,
         allan: analysis.allan,
+        synthetic: synthetic.result,
       },
       verdict,
     };
@@ -593,6 +596,76 @@
             <p class="empty-d">Sin datos.</p>
           </div>
         {/if}
+
+        <div class="card">
+          <div class="card-h">Validación sintética de detectores</div>
+          <p class="note inline" style="margin-top:0;margin-bottom:12px">
+            Pasa una grilla de impulsos gaussianos (peak × duración × ruido × repeticiones) por el pipeline real
+            y compara contra el ground truth derivado del preset clínico activo
+            (<b>{acceptance.active.name}</b>).
+          </p>
+
+          {#if synthetic.state === 'idle' || synthetic.state === 'error'}
+            <div class="actions-row">
+              <button class="primary" onclick={() => synthetic.run()}>▶ Ejecutar validación</button>
+              <span class="note inline" style="margin:0;padding:6px 10px">Grid por defecto: 6 × 4 × 3 × 30 = 2160 ensayos</span>
+            </div>
+            {#if synthetic.error}<div class="err-inline">{synthetic.error}</div>{/if}
+          {:else if synthetic.state === 'running'}
+            <div class="empty small">
+              <div class="spinner-sm"></div>
+              <p class="empty-d">Generando trazas y evaluando detectores…</p>
+            </div>
+          {:else if synthetic.state === 'done' && synthetic.result}
+            {@const r = synthetic.result}
+            <div class="mini-stats" style="margin-bottom:12px">
+              <div><span>Trials</span><b>{r.totalTrials}</b></div>
+              <div><span>In-spec</span><b>{r.inSpecCount}</b></div>
+              <div><span>Out-of-spec</span><b>{r.outOfSpecCount}</b></div>
+              <div><span>Tiempo</span><b>{r.durationMs.toFixed(0)} ms</b></div>
+            </div>
+
+            <table class="tbl" style="margin-bottom:12px">
+              <thead>
+                <tr>
+                  <th>Detector</th>
+                  <th>TP</th><th>FP</th><th>TN</th><th>FN</th>
+                  <th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each r.perDetector as d}
+                  <tr>
+                    <td><b>{d.detector}</b></td>
+                    <td>{d.confusion.tp}</td>
+                    <td>{d.confusion.fp}</td>
+                    <td>{d.confusion.tn}</td>
+                    <td>{d.confusion.fn}</td>
+                    <td class:warn-val={d.accuracy < 0.9}>{(d.accuracy * 100).toFixed(1)}%</td>
+                    <td>{(d.precision * 100).toFixed(1)}%</td>
+                    <td>{(d.recall * 100).toFixed(1)}%</td>
+                    <td>{(d.f1 * 100).toFixed(1)}%</td>
+                  </tr>
+                {/each}
+                <tr style="border-top:2px solid var(--border-strong)">
+                  <td><b>Global (∧)</b></td>
+                  <td>{r.globalConfusion.tp}</td>
+                  <td>{r.globalConfusion.fp}</td>
+                  <td>{r.globalConfusion.tn}</td>
+                  <td>{r.globalConfusion.fn}</td>
+                  <td colspan="4" style="color:var(--text-muted);font-size:11px">
+                    Aceptación combinada (todos los detectores pass)
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div class="actions-row">
+              <button onclick={() => synthetic.run()}>↻ Re-ejecutar</button>
+              <button onclick={() => synthetic.reset()}>Limpiar</button>
+            </div>
+          {/if}
+        </div>
 
         <div class="actions-row right">
           <button onclick={() => (step = 'capture')}>← Nueva captura</button>
