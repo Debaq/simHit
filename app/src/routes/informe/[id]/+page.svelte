@@ -28,7 +28,7 @@
     const id = page.params.id ?? '';
     const r = reports.get(id);
     if (!r) {
-      goto('/informe');
+      goto('/informes');
       return;
     }
     if (!r.findings) r.findings = emptyFindings();
@@ -74,7 +74,6 @@
     if (!report) return;
     const { save } = await import('@tauri-apps/plugin-dialog');
     const { invoke } = await import('@tauri-apps/api/core');
-    // @ts-expect-error: html2pdf.js no incluye tipos
     const html2pdfMod = await import('html2pdf.js');
     const html2pdf = html2pdfMod.default ?? html2pdfMod;
 

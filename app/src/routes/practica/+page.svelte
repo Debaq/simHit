@@ -205,7 +205,6 @@
     // Asegura que exista una entrada de informe para asociar el PDF persistido.
     const id = await savePracticeReport({ partial: !practice.done });
     const mod = await import('html2pdf.js');
-    // @ts-expect-error html2pdf.js no incluye tipos
     const html2pdf = (mod.default ?? mod);
     const name = practice.practitioner || 'sin_nombre';
     const filename = `${slugName(name)}_${humanStamp()}.pdf`;
