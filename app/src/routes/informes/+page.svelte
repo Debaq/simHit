@@ -190,9 +190,9 @@
                   {#if r.hasPdf}<span class="tag submitted">Sí</span>{:else}<span class="tag draft">—</span>{/if}
                 </td>
                 <td class="actions">
-                  <a href={`/informes/practica/${r.id}`}>Ver</a>
-                  {#if r.hasPdf}<button class="link" onclick={() => downloadPracticePdf(r.id)}>PDF</button>{/if}
-                  <button class="link" onclick={() => exportPracticeJson(r.id)}>JSON</button>
+                  <a class="btn btn-primary" href={`/informes/practica/${r.id}`}>Ver</a>
+                  <button class="btn btn-ghost" onclick={() => downloadPracticePdf(r.id)} disabled={!r.hasPdf} title={r.hasPdf ? 'Descargar PDF' : 'Sin PDF guardado'}>PDF</button>
+                  <button class="btn btn-ghost" onclick={() => exportPracticeJson(r.id)} title="Exportar JSON">JSON</button>
                 </td>
               </tr>
             {/each}
@@ -236,9 +236,9 @@
                   {#if r.submitted}<span class="tag submitted">Enviado</span>{:else}<span class="tag draft">Borrador</span>{/if}
                 </td>
                 <td class="actions">
-                  <a href={`/informe/${r.id}`}>Ver</a>
-                  <button class="link" onclick={() => downloadSimPdf(r.id)}>PDF</button>
-                  <button class="link" onclick={() => exportSimJson(r.id)}>JSON</button>
+                  <a class="btn btn-primary" href={`/informe/${r.id}`}>Ver</a>
+                  <button class="btn btn-ghost" onclick={() => downloadSimPdf(r.id)} title="Descargar PDF">PDF</button>
+                  <button class="btn btn-ghost" onclick={() => exportSimJson(r.id)} title="Exportar JSON">JSON</button>
                 </td>
               </tr>
             {/each}
@@ -295,12 +295,26 @@
   .tag.submitted { background: var(--success-bg, rgba(80,200,120,0.15)); color: var(--success, #50c878); }
   .tag.draft { background: var(--warn-bg, rgba(255,180,80,0.12)); color: var(--text-muted); }
 
-  .actions { display: flex; gap: 8px; align-items: center; }
-  .actions a, .actions button.link {
-    background: transparent; border: 0; color: var(--accent, #4a9eff);
-    cursor: pointer; padding: 0; font-size: 13px; text-decoration: none;
+  .actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px; border-radius: 999px; font-size: 12px; line-height: 1;
+    border: 1px solid var(--border); cursor: pointer; text-decoration: none;
+    transition: background-color .12s, border-color .12s, color .12s;
   }
-  .actions a:hover, .actions button.link:hover { text-decoration: underline; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary {
+    background: var(--accent, #4a9eff); color: white; border-color: var(--accent, #4a9eff);
+  }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-ghost {
+    background: transparent; color: var(--text);
+  }
+  .btn-ghost:not(:disabled):hover {
+    background: var(--surface-alt, rgba(255,255,255,0.06));
+    border-color: var(--accent, #4a9eff);
+    color: var(--accent, #4a9eff);
+  }
 
   button.primary {
     background: var(--accent, #4a9eff); color: white; border: 0;
