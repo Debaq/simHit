@@ -4,7 +4,7 @@
 // totales o aciertos por preset).
 
 import { acceptance } from '$lib/acceptance.svelte';
-import { sim, isHorizontalSide, type Verdict, type Impulse, type ImpulseSide } from '$lib/simulator.svelte';
+import { sim, type Verdict, type Impulse, type ImpulseSide } from '$lib/simulator.svelte';
 import type { Escenario } from '$lib/bundle.svelte';
 import type { Channel } from '$lib/scenario.svelte';
 
@@ -12,8 +12,8 @@ export interface SeqItem {
   /** Posición original en la secuencia (no cambia tras la mezcla). */
   idx: number;
   acceptanceId: string;
-  /** Canal objetivo del item (#13 F8). Solo presente en variantes 'multi'. */
-  targetChannel?: Channel;
+  /** Canal objetivo del item. Siempre presente en práctica unificada. */
+  targetChannel: Channel;
 }
 
 export interface Attempt {
@@ -72,7 +72,6 @@ class PracticeStore {
   active = $state(false);
   paused = $state(false);
   bundleId = $state<string | null>(null);
-  variant = $state<'horiz' | 'vert' | 'multi'>('horiz');
   /** Modo de finalización del bundle. */
   mode = $state<'attempts' | 'hits'>('attempts');
   /** Requeridos por preset (para modo 'hits'). */
@@ -91,28 +90,28 @@ class PracticeStore {
 
   private prevAcceptanceId: string | null = null;
   private lastSeenImpulseId = 0;
-  /** En modo 'hits' la secuencia es virtual: el current se elige de los presets que aún no completaron sus aciertos. */
-  private hitsOrder: string[] = [];
+  /** En modo 'hits' la secuencia es virtual: se eligen goals pendientes (por
+   *  acceptanceId + canal) hasta cumplir sus aciertos individuales. */
+  private hitsGoals: { acceptanceId: string; targetChannel: Channel; required: number }[] = [];
+  private hitsByGoal: number[] = [];
   private hitsCursor = 0;
   private hitsRandom = false;
 
   get current(): SeqItem | null {
     if (!this.active || this.done) return null;
     if (this.mode === 'attempts') return this.sequence[this.cursor] ?? null;
-    // hits: tomar el siguiente preset cuyo aciertos < requeridos
+    // hits: tomar el siguiente goal cuyo aciertos < required
     return this.nextPendingHits();
   }
 
   private nextPendingHits(): SeqItem | null {
-    const order = this.hitsOrder;
-    if (order.length === 0) return null;
-    for (let i = 0; i < order.length; i++) {
-      const idx = (this.hitsCursor + i) % order.length;
-      const id = order[idx];
-      const need = this.required[id] ?? 0;
-      const got = this.hitsByPreset[id] ?? 0;
-      if (got < need) {
-        return { idx, acceptanceId: id };
+    const n = this.hitsGoals.length;
+    if (n === 0) return null;
+    for (let i = 0; i < n; i++) {
+      const idx = (this.hitsCursor + i) % n;
+      const g = this.hitsGoals[idx];
+      if ((this.hitsByGoal[idx] ?? 0) < g.required) {
+        return { idx, acceptanceId: g.acceptanceId, targetChannel: g.targetChannel };
       }
     }
     return null;
@@ -121,9 +120,9 @@ class PracticeStore {
   get done(): boolean {
     if (!this.active) return false;
     if (this.mode === 'attempts') return this.cursor >= this.sequence.length;
-    // hits: cuando todos los presets cumplen su required
-    for (const id of this.hitsOrder) {
-      if ((this.hitsByPreset[id] ?? 0) < (this.required[id] ?? 0)) return false;
+    // hits: cuando todos los goals cumplen su required
+    for (let i = 0; i < this.hitsGoals.length; i++) {
+      if ((this.hitsByGoal[i] ?? 0) < this.hitsGoals[i].required) return false;
     }
     return true;
   }
@@ -134,15 +133,15 @@ class PracticeStore {
       return { current: Math.min(this.cursor, total), total };
     }
     let got = 0, need = 0;
-    for (const id of this.hitsOrder) {
-      need += this.required[id] ?? 0;
-      got += Math.min(this.hitsByPreset[id] ?? 0, this.required[id] ?? 0);
+    for (let i = 0; i < this.hitsGoals.length; i++) {
+      need += this.hitsGoals[i].required;
+      got += Math.min(this.hitsByGoal[i] ?? 0, this.hitsGoals[i].required);
     }
     return { current: got, total: need };
   }
 
   /** Restantes por preset (modo attempts: cuenta items pendientes de la secuencia;
-   *  modo hits: required - hits). */
+   *  modo hits: required - hits). Agrupa por acceptanceId para mostrar al usuario. */
   get remainingByPreset(): Record<string, number> {
     const r: Record<string, number> = {};
     if (this.mode === 'attempts') {
@@ -151,51 +150,51 @@ class PracticeStore {
         r[id] = (r[id] ?? 0) + 1;
       }
     } else {
-      for (const id of this.hitsOrder) {
-        r[id] = Math.max(0, (this.required[id] ?? 0) - (this.hitsByPreset[id] ?? 0));
+      for (let i = 0; i < this.hitsGoals.length; i++) {
+        const g = this.hitsGoals[i];
+        const rem = Math.max(0, g.required - (this.hitsByGoal[i] ?? 0));
+        r[g.acceptanceId] = (r[g.acceptanceId] ?? 0) + rem;
       }
     }
     return r;
   }
 
   start(b: Escenario, practitioner = '') {
-    if (b.kind === 'clinico') return;
-    const goals = (b.goals ?? []).filter((g) => g.count > 0);
+    if (b.kind !== 'practica') return;
+    const goals = (b.goals ?? []).filter((g) => g.count > 0 && !!g.targetChannel);
     if (goals.length === 0) return;
 
     this.practitioner = practitioner.trim();
 
     this.bundleId = b.id;
-    this.variant =
-      b.kind === 'practica-vert' ? 'vert' :
-      b.kind === 'practica-multi' ? 'multi' : 'horiz';
     this.mode = b.mode ?? 'attempts';
 
-    // Construir secuencia base en orden de la lista del docente. En 'multi'
-    // cada item lleva su `targetChannel` para que el HUD pueda mostrar el
-    // canal exacto y la transición de plano cuando cambia.
+    // Construir secuencia base en orden de la lista del docente. Cada item
+    // lleva su `targetChannel` (obligatorio en la práctica unificada) para
+    // que el HUD pueda mostrar el canal exacto y la transición de plano.
     const base: SeqItem[] = [];
     let idx = 0;
     for (const g of goals) {
       for (let i = 0; i < g.count; i++) {
-        const item: SeqItem = { idx: idx++, acceptanceId: g.acceptanceId };
-        if (g.targetChannel) item.targetChannel = g.targetChannel;
-        base.push(item);
+        base.push({ idx: idx++, acceptanceId: g.acceptanceId, targetChannel: g.targetChannel });
       }
     }
     const order = b.order ?? 'random';
     this.sequence = order === 'random' ? shuffle(base).map((x, i) => ({ ...x, idx: i })) : base;
     this.cursor = 0;
 
-    // Para modo 'hits' guardamos required y orden de presentación de presets.
+    // Para modo 'hits' guardamos required por (acceptanceId, canal). El total
+    // agregado por acceptanceId se sigue exponiendo en `required` para que
+    // los informes y la UI lo muestren agrupado por nivel.
     const req: Record<string, number> = {};
-    const hitOrder: string[] = [];
+    const hitsGoals: { acceptanceId: string; targetChannel: Channel; required: number }[] = [];
     for (const g of goals) {
       req[g.acceptanceId] = (req[g.acceptanceId] ?? 0) + g.count;
-      if (!hitOrder.includes(g.acceptanceId)) hitOrder.push(g.acceptanceId);
+      hitsGoals.push({ acceptanceId: g.acceptanceId, targetChannel: g.targetChannel, required: g.count });
     }
     this.required = req;
-    this.hitsOrder = order === 'random' ? shuffle(hitOrder) : hitOrder;
+    this.hitsGoals = order === 'random' ? shuffle(hitsGoals) : hitsGoals;
+    this.hitsByGoal = new Array(this.hitsGoals.length).fill(0);
     this.hitsRandom = order === 'random';
     this.hitsByPreset = {};
     this.hitsCursor = 0;
@@ -226,6 +225,8 @@ class PracticeStore {
     this.cursor = 0;
     this.hitsByPreset = {};
     this.hitsCursor = 0;
+    this.hitsGoals = [];
+    this.hitsByGoal = [];
     this.required = {};
     this.bundleId = null;
     this.startedMs = 0;
@@ -248,17 +249,11 @@ class PracticeStore {
     const cur = this.current;
     if (!cur) return;
 
-    const isHoriz = isHorizontalSide(side);
-    if (this.variant === 'vert' && isHoriz) return;
-    if (this.variant === 'horiz' && !isHoriz) return;
-    // variant 'multi': se aceptan los 6 canales. Si el goal actual fija un
-    // canal específico vía `targetChannel`, los impulsos de otros canales se
-    // registran como intento fuera de objetivo (ok=false) — esto permite que
-    // el practicante vea feedback inmediato si dispara en el canal equivocado.
-    let offTarget = false;
-    if (this.variant === 'multi' && cur.targetChannel && side !== cur.targetChannel) {
-      offTarget = true;
-    }
+    // El goal actual fija un canal específico. Los impulsos en canal distinto
+    // se registran como intento fuera de objetivo (ok=false) — el practicante
+    // ve feedback inmediato si dispara en el canal equivocado y NO consume el
+    // goal (no avanza el cursor).
+    const offTarget = side !== cur.targetChannel;
 
     // Solo marcar consumido si el impulso pasó los filtros y se va a procesar.
     this.lastSeenImpulseId = impulseId;
@@ -270,7 +265,7 @@ class PracticeStore {
     const traceEye: number[] = imp ? Array.from(imp.eye) : [];
 
     const reasons = verdict.reasons.slice();
-    if (offTarget && cur.targetChannel) {
+    if (offTarget) {
       reasons.unshift(`canal fuera de objetivo (esperado ${cur.targetChannel}, recibido ${side})`);
     }
     const ok = verdict.ok && !offTarget;
@@ -292,22 +287,28 @@ class PracticeStore {
     }];
 
     if (this.mode === 'attempts') {
-      // En 'multi' con canal objetivo: un impulso en el canal equivocado NO
-      // consume el goal (no avanza el cursor). Sí se registra para que el
-      // practicante vea el intento fallido en el historial.
+      // Un impulso en el canal equivocado NO consume el goal (no avanza el
+      // cursor). Sí se registra para que el practicante vea el fallido.
       if (!offTarget) this.cursor++;
     } else {
-      // hits: solo aciertos avanzan. Los fallos quedan registrados pero no cuentan.
+      // hits: solo aciertos avanzan. Los fallos quedan registrados pero no
+      // cuentan. El cur.idx en modo hits viene de `hitsGoals[idx]`.
       if (ok) {
-        const newCount = (this.hitsByPreset[cur.acceptanceId] ?? 0) + 1;
-        this.hitsByPreset = { ...this.hitsByPreset, [cur.acceptanceId]: newCount };
-        // En orden secuencial: solo rotar cuando el preset actual cumplió sus aciertos.
-        // En aleatorio: rotar siempre para mezclar presets.
-        const need = this.required[cur.acceptanceId] ?? 0;
+        const gi = cur.idx;
+        const newCount = (this.hitsByGoal[gi] ?? 0) + 1;
+        const next = this.hitsByGoal.slice();
+        next[gi] = newCount;
+        this.hitsByGoal = next;
+        // También acumulamos por acceptanceId para la UI agrupada.
+        this.hitsByPreset = {
+          ...this.hitsByPreset,
+          [cur.acceptanceId]: (this.hitsByPreset[cur.acceptanceId] ?? 0) + 1,
+        };
+        const need = this.hitsGoals[gi]?.required ?? 0;
         const completedThis = newCount >= need;
         const shouldRotate = this.hitsRandom || completedThis;
-        if (shouldRotate) {
-          this.hitsCursor = (this.hitsCursor + 1) % this.hitsOrder.length;
+        if (shouldRotate && this.hitsGoals.length > 0) {
+          this.hitsCursor = (this.hitsCursor + 1) % this.hitsGoals.length;
         }
       }
     }
@@ -328,7 +329,7 @@ class PracticeStore {
     this.attempts = [...this.attempts, {
       itemIdx: cur.idx,
       acceptanceId: cur.acceptanceId,
-      side: 'LL',
+      side: cur.targetChannel,
       ok: false,
       peak: 0, gain: 0, durMs: 0, amp: 0,
       reasons: ['saltado por docente'],
@@ -342,7 +343,7 @@ class PracticeStore {
       this.cursor++;
     } else {
       // hits: avanzar cursor de presentación pero sin sumar acierto.
-      this.hitsCursor = (this.hitsCursor + 1) % Math.max(1, this.hitsOrder.length);
+      this.hitsCursor = (this.hitsCursor + 1) % Math.max(1, this.hitsGoals.length);
     }
     if (this.done) {
       this.endedMs = Date.now();
