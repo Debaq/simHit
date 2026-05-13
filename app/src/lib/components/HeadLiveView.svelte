@@ -531,18 +531,20 @@
           <line x1="-92" y1="0" x2="92" y2="0" stroke="var(--border-strong)" stroke-dasharray="3 3" />
           <!-- Banda roja: fuera de zona de advertencia -->
           <circle cx="0" cy="0" r="92" fill="var(--danger)" opacity="0.10" />
-          <!-- Banda amarilla: ±1.5×PITCH_TOL -->
+          <!-- Banda amarilla: ±1.5×PITCH_TOL. SVG Y apunta hacia abajo: invertimos
+               sin() y barrido del arco para que pitch negativo (chin-down)
+               quede graficado abajo. -->
           <path
-            d={`M 0 0 L ${92 * Math.cos(pitchWA)} ${92 * Math.sin(pitchWA)} A 92 92 0 0 1 ${92 * Math.cos(pitchWB)} ${92 * Math.sin(pitchWB)} Z`}
+            d={`M 0 0 L ${92 * Math.cos(pitchWA)} ${-92 * Math.sin(pitchWA)} A 92 92 0 0 0 ${92 * Math.cos(pitchWB)} ${-92 * Math.sin(pitchWB)} Z`}
             fill="#facc15"
           />
-          <!-- Zona objetivo pitch (sector ±PITCH_TOL desde horizontal-frente) -->
+          <!-- Zona objetivo pitch (sector ±PITCH_TOL desde pose objetivo) -->
           <path
-            d={`M 0 0 L ${92 * Math.cos(pitchA)} ${92 * Math.sin(pitchA)} A 92 92 0 0 1 ${92 * Math.cos(pitchB)} ${92 * Math.sin(pitchB)} Z`}
+            d={`M 0 0 L ${92 * Math.cos(pitchA)} ${-92 * Math.sin(pitchA)} A 92 92 0 0 0 ${92 * Math.cos(pitchB)} ${-92 * Math.sin(pitchB)} Z`}
             fill="#22c55e"
           />
-          <!-- Perfil cabeza, rota con pitch -->
-          <g transform="rotate({pitch})">
+          <!-- Perfil cabeza, rota con pitch (signo invertido por convenio Y de SVG) -->
+          <g transform="rotate({-pitch})">
             <line x1="38" y1="0" x2="92" y2="0" stroke="#000" stroke-width="3.5" stroke-linecap="round" />
             <ellipse cx="-4" cy="-4" rx="44" ry="48" fill="var(--surface)" stroke="var(--head-color)" stroke-width="2" />
             <path d="M 38 -2 L 54 -4 L 38 8 Z" fill="var(--head-color)" />
