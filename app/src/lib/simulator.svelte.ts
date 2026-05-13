@@ -27,6 +27,10 @@ export type Impulse = {
   headYawRaw?: Float64Array;
   /** Velocidad cruda pitch °/s muestra a muestra. */
   headPitchRaw?: Float64Array;
+  /** Aceleracion angular (°/s²) proyectada sobre el eje del canal,
+   *  capturada del firmware muestra a muestra durante el impulso. Undefined
+   *  cuando el firmware es legacy o el impulso es simulado puro. */
+  angAcc?: Float64Array;
 };
 
 /** Vector unitario del plano de cada canal en el frame (yaw, pitch).
@@ -265,6 +269,9 @@ class Simulator {
     /** Velocidades crudas yaw/pitch para revisar trayectorias diagonales. */
     headYawRaw: number[];
     headPitchRaw: number[];
+    /** Aceleracion angular proyectada sobre el eje del canal (°/s²). Solo
+     *  poblada cuando el firmware extendido entrega los valores. */
+    angAcc: number[];
     poseYaw0: number;
     posePitch0: number;
     poseRoll0: number;
@@ -437,6 +444,7 @@ class Simulator {
       eye: [],
       headYawRaw: [],
       headPitchRaw: [],
+      angAcc: [],
       poseYaw0: this.headYaw,
       posePitch0: this.headPitch,
       poseRoll0: this.headRoll,
@@ -590,9 +598,11 @@ class Simulator {
     // Drenar muestras gyro yaw + pitch en paralelo. drainGyro vacía la cola
     // una sola vez y devuelve ambos arrays alineados muestra a muestra.
     // Evita pérdidas/duplicados por bursts USB y jitter del setInterval.
-    const drained = serial.drainGyro();
+    const drained = serial.drainAll();
     let yawSamples = drained.yaw;
     let pitchSamples = drained.pitch;
+    let angAccYawSamples = drained.angAccelYaw;
+    let angAccPitchSamples = drained.angAccelPitch;
     // Defensivo: si por algún motivo los largos difieren (no debería ocurrir
     // porque ambos vienen de la misma cola), truncar al mínimo y dejar TODO.
     // TODO[#13]: revisar si el firmware puede llegar a desalinear yaw/pitch.
@@ -600,6 +610,8 @@ class Simulator {
       const n = Math.min(yawSamples.length, pitchSamples.length);
       yawSamples = yawSamples.slice(0, n);
       pitchSamples = pitchSamples.slice(0, n);
+      angAccYawSamples = angAccYawSamples.slice(0, n);
+      angAccPitchSamples = angAccPitchSamples.slice(0, n);
     }
 
     // Suavizado con dt fijo (1/FS) por muestra. τ=50ms.
@@ -656,6 +668,7 @@ class Simulator {
           this.capturing = {
             side, t: [], head: [], eye: [],
             headYawRaw: [], headPitchRaw: [],
+            angAcc: [],
             poseYaw0: this.headYaw,
             posePitch0: this.headPitch,
             poseRoll0: this.headRoll,
@@ -705,6 +718,13 @@ class Simulator {
         this.capturing.eye.push(eyeSig);
         this.capturing.headYawRaw.push(yawRaw);
         this.capturing.headPitchRaw.push(pitchRaw);
+        // Proyectar la aceleracion angular sobre el eje del canal (mismas
+        // componentes que la velocidad). Solo significativa con firmware
+        // extendido; en legacy los samples vienen en 0 y el detector hara skip.
+        const aaYaw = angAccYawSamples[i] ?? 0;
+        const aaPitch = angAccPitchSamples[i] ?? 0;
+        const aaProj = aaYaw * axis.yaw + aaPitch * axis.pitch;
+        this.capturing.angAcc.push(aaProj);
         lastEyeSig = eyeSig;
       }
       eyeHistory[i] = lastEyeSig;
@@ -794,6 +814,14 @@ class Simulator {
       gain,
       headYawRaw: Float64Array.from(c.headYawRaw),
       headPitchRaw: Float64Array.from(c.headPitchRaw),
+      // angAcc solo se incluye si efectivamente se capturaron muestras del
+      // firmware extendido (al menos un valor no-cero o longitud > 0 con datos
+      // del firmware extendido). Para impulsos simulados (cliente sin sensor)
+      // o legacy, el array esta lleno de 0 o vacio: lo dejamos undefined para
+      // que el detector haga skip de forma explicita.
+      angAcc: c.angAcc.length > 0 && c.angAcc.some((v) => v !== 0)
+        ? Float64Array.from(c.angAcc)
+        : undefined,
     };
     switch (c.side) {
       case 'LL': this.impulsesLL = [...this.impulsesLL, imp].slice(-15); break;

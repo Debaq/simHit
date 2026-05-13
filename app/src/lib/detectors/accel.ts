@@ -1,19 +1,19 @@
-// Detector: aceleración pico estimada a partir de la derivada de la velocidad
-// del impulso. Si el preset tiene accelMin*/accelMax* en null para el plano
-// correspondiente, el detector se salta (skip silencioso con severity='pass'
-// y peso 0).
+// Detector: aceleración angular pico. Si el firmware extendido entregó
+// muestras durante el impulso (impulse.angAcc), usa el pico de esa serie;
+// si no, hace skip silencioso con severity='pass' y weight=0. El skip por
+// firmware legacy es informativo, no marca el impulso como fallido.
+//
+// Si el preset tiene accelMin*/accelMax* en null para el plano correspondiente,
+// también hace skip silencioso.
 
 import { isHorizontalSide } from '$lib/simulator.svelte';
 import type { Detector, DetectorContext, DetectorResult } from './types';
 
-function peakAccel(t: Float64Array, head: Float64Array): number {
-  if (t.length < 2) return 0;
+function peakAbs(arr: Float64Array): number {
   let peak = 0;
-  for (let i = 1; i < t.length; i++) {
-    const dt = (t[i] - t[i - 1]) / 1000; // ms -> s
-    if (dt <= 0) continue;
-    const a = Math.abs((head[i] - head[i - 1]) / dt);
-    if (a > peak) peak = a;
+  for (let i = 0; i < arr.length; i++) {
+    const v = Math.abs(arr[i]);
+    if (v > peak) peak = v;
   }
   return peak;
 }
@@ -37,7 +37,20 @@ export const accelDetector: Detector = {
         weight: 0,
       };
     }
-    const a = peakAccel(ctx.impulse.t, ctx.impulse.head);
+    const angAcc = ctx.impulse.angAcc;
+    if (!angAcc || angAcc.length === 0) {
+      // Firmware legacy (sin aceleración angular en el stream) o impulso
+      // simulado: el detector se omite. No invalida el impulso.
+      return {
+        id: 'accel',
+        severity: 'pass',
+        measured: null,
+        expected: { min, max },
+        message: 'aceleración no disponible en este firmware',
+        weight: 0,
+      };
+    }
+    const a = peakAbs(angAcc);
     const ok = a >= min && a <= max;
     return {
       id: 'accel',
