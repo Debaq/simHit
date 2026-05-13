@@ -45,6 +45,14 @@ date-released: "2026-05-13"
 license: MIT
 repository-code: "https://github.com/Debaq/simHit"
 url: "https://github.com/Debaq/simHit"
+doi: 10.5281/zenodo.20160851
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.20160851
+    description: Concept DOI (apunta siempre a la última versión publicada)
+  - type: doi
+    value: 10.5281/zenodo.20160852
+    description: DOI de la versión 2026.5.0
 keywords:
   - vHIT
   - Head Impulse Test

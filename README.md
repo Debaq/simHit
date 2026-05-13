@@ -1,5 +1,8 @@
 # SimHIT — Simulador para enseñar el Head Impulse Test (vHIT)
 
+[![DOI](https://zenodo.org/badge/796131841.svg)](https://doi.org/10.5281/zenodo.20160851)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **Plataforma educativa abierta · v2026.5.0**
 
 SimHIT es un simulador completo para enseñar y entrenar el Head Impulse Test asistido por video (vHIT). Las **gafas SimHIT replican el equipo clínico real**: mismo peso, misma forma, mismo sistema de ajuste y los mismos sensores de movimiento. La única pieza que falta respecto a un vHIT comercial es la cámara que filma el ojo del paciente — y esa ausencia es deliberada, porque el ojo lo aporta el paciente virtual del software.
@@ -228,7 +231,7 @@ En SimHIT el alumno entrena los pasos 1, 3, 4, 5 y 6 sin riesgo. Los pasos 2 y 7
 
 Proyecto académico de la **Universidad Austral de Chile**, abierto a uso e implementación por otras instituciones bajo Licencia MIT.
 
-> Baier-Quezada N., Uribe-Hernández V. S., López-Moncada F., Poza-Nauto P., Barrientos-Tolero H., Araneda-Aranda R. *SimHIT: simulador open source para entrenamiento del Head Impulse Test.* Universidad Austral de Chile, 2026.
+> Baier-Quezada N., Uribe-Hernández V. S., López-Moncada F., Poza-Nauto P., Barrientos-Tolero H., Araneda-Aranda R. *SimHIT: simulador open source para entrenamiento del Head Impulse Test* (v2026.5.0). Universidad Austral de Chile, 2026. https://doi.org/10.5281/zenodo.20160851
 
 Contacto: `david.avila@uach.cl`
 
