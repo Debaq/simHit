@@ -17,11 +17,9 @@
     /**
      * Canal objetivo activo. Si está definido y es vertical, se dibuja la
      * marca de pose diagonal (yaw ≈ ±45°) y se ajusta el mensaje correctivo.
-     * Si está indefinido, comportamiento histórico (pose neutra yaw/pitch=0).
-     * Valor especial `'vert-any'`: práctica vertical sin canal único — se
-     * eligen dinámicamente los dos planos (LARP + RALP) como objetivos válidos.
+     * Si está indefinido, comportamiento neutro (pose neutra yaw/pitch=0).
      */
-    targetChannel = undefined as Channel | 'vert-any' | undefined,
+    targetChannel = undefined as Channel | undefined,
   } = $props();
 
   // ── Pose objetivo por canal ───────────────────────────────────────────
@@ -42,19 +40,17 @@
   }
 
   /** Marcas diagonales activas en la vista superior (yaw).
-   *  - Canal específico → una marca a su yaw_target.
-   *  - 'vert-any'       → dos marcas (-45, +45) cubriendo LARP y RALP.
-   *  - undefined o LL/RL → ninguna (zona verde neutra).
+   *  - Canal vertical específico → una marca a su yaw_target (±45°).
+   *  - undefined o canal horizontal → ninguna (zona verde neutra).
    */
   let yawTargets = $derived.by<number[]>(() => {
-    if (targetChannel === 'vert-any') return [-45, 45];
     if (targetChannel && isVerticalChannel(targetChannel)) {
       return [POSE_TARGETS[targetChannel].yaw];
     }
     return [];
   });
   let targetChannelLabel = $derived.by(() => {
-    if (!targetChannel || targetChannel === 'vert-any') return null;
+    if (!targetChannel) return null;
     return `${targetChannel} · ${CHANNEL_LABELS[targetChannel]}`;
   });
 
@@ -135,23 +131,16 @@
     return () => cancelAnimationFrame(raf);
   });
 
-  /** Yaw objetivo efectivo: 0 para horizontal/sin objetivo; ±45 para vertical
-   *  específico; el más cercano al yaw actual si 'vert-any'. */
+  /** Yaw objetivo efectivo: 0 para horizontal/sin objetivo; ±45 para vertical. */
   let activeYawTarget = $derived.by<number>(() => {
     if (yawTargets.length === 0) return 0;
-    if (yawTargets.length === 1) return yawTargets[0];
-    // 'vert-any': elegir el target más cercano a la pose actual (sticky).
-    return yawTargets.reduce((best, y) =>
-      Math.abs(yaw - y) < Math.abs(yaw - best) ? y : best,
-    yawTargets[0]);
+    return yawTargets[0];
   });
 
-  /** Pitch objetivo según canal: -30° (chin-down) para canal horizontal
-   *  específico; 0 para verticales o sin canal. */
+  /** Pitch objetivo según canal: -30° (chin-down) para canal horizontal;
+   *  0 para verticales o sin canal. */
   let activePitchTarget = $derived.by<number>(() => {
-    if (targetChannel && targetChannel !== 'vert-any') {
-      return POSE_TARGETS[targetChannel].pitch;
-    }
+    if (targetChannel) return POSE_TARGETS[targetChannel].pitch;
     return 0;
   });
 
@@ -351,8 +340,6 @@
       <span>Posición de la cabeza</span>
       {#if targetChannelLabel}
         <span class="target-chip" title="Canal objetivo activo">🎯 {targetChannelLabel}</span>
-      {:else if targetChannel === 'vert-any'}
-        <span class="target-chip" title="Plano vertical: cualquiera (LARP o RALP)">🎯 Vertical (LARP/RALP)</span>
       {/if}
       <span class="pose-tag" class:ok={poseOk} class:warn={!poseOk}>
         {poseOk ? '✓' : '!'} {poseLabel.txt}

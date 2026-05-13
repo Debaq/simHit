@@ -62,7 +62,7 @@
 
   let progress = $derived(practice.progress);
   let current = $derived(practice.current);
-  /** Canal objetivo del goal actual (solo definido en variant 'multi'). */
+  /** Canal objetivo del goal actual (siempre definido en práctica unificada). */
   let currentTarget = $derived(current?.targetChannel ?? null);
 
   // Detección de transición de plano entre goals (multi). Cuando el target
@@ -94,7 +94,7 @@
       return;
     }
     if (t === prevTarget) return;
-    if (practice.variant === 'multi' && t) {
+    if (t) {
       transitionMsg = transitionHint(prevTarget, t);
       transitionUntil = Date.now() + 4500; // banner dura ~4.5s
     }
@@ -107,7 +107,7 @@
     return () => clearInterval(id);
   });
   let banner = $derived(
-    practice.variant === 'multi' && transitionUntil > nowMs && transitionMsg !== '',
+    transitionUntil > nowMs && transitionMsg !== '',
   );
   let poseBanner = $derived(poseBannerUntil > nowMs && poseBannerMsg !== '');
   let remaining = $derived(practice.remainingByPreset);
@@ -203,7 +203,9 @@
       practitioner: practice.practitioner,
       bundleId: bundle.id,
       bundleName: bundle.name ?? bundle.id,
-      variant: practice.variant,
+      // Campo histórico; en la práctica unificada todos los reports nuevos
+      // son multicanal (cada goal lleva su canal).
+      variant: 'multi',
       mode: practice.mode,
       startedMs: practice.startedMs,
       endedMs: now,
@@ -340,13 +342,7 @@
         <div class="head-card">
           <HeadLiveView
             impulseLayout="prominent"
-            targetChannel={
-              bundle?.kind === 'practica-multi'
-                ? (currentTarget ?? undefined)
-                : bundle?.kind === 'practica-vert'
-                  ? 'vert-any'
-                  : undefined
-            }
+            targetChannel={currentTarget ?? undefined}
           />
           {#if banner}
             <div class="plane-banner">
@@ -365,11 +361,7 @@
           <div class="panel">
             <div class="panel-title">
               <span>Sesión de práctica</span>
-              <span class="kind-tag {bundle.kind}">{
-                bundle.kind === 'practica-horiz' ? 'Horizontal'
-                  : bundle.kind === 'practica-vert' ? 'Vertical'
-                  : 'Multicanal'
-              }</span>
+              <span class="kind-tag {bundle.kind}">Práctica vHIT</span>
             </div>
 
             {#if !practice.active}
@@ -378,22 +370,15 @@
                   Configurado: <b>{goalCount}</b> {bundle.mode === 'hits' ? 'aciertos' : 'intentos'}
                   · orden <b>{bundle.order === 'sequential' ? 'secuencial' : 'aleatorio'}</b>
                 </p>
-                {#if bundle.kind === 'practica-vert'}
-                  <div class="vert-hint">
-                    🧭 <b>Práctica vertical (planos LARP / RALP).</b>
-                    Posiciona la cabeza girada ~45° a izquierda (LARP: LA / RP) o a derecha (RALP: RA / LP)
-                    antes de cada impulso. El canal se identifica automáticamente según la pose y la dirección del impulso.
-                  </div>
-                {:else if bundle.kind === 'practica-multi'}
-                  <div class="vert-hint">
-                    🧭 <b>Práctica multicanal (6 canales).</b>
-                    Cada objetivo fija un canal específico. La vista superior muestra la pose esperada;
-                    se anuncia la transición entre planos (horizontal → LARP → RALP) al cambiar de canal.
-                  </div>
-                {/if}
+                <div class="vert-hint">
+                  🧭 <b>Práctica vHIT.</b>
+                  Cada objetivo fija un canal específico. La vista superior muestra la pose
+                  esperada; se anuncia la transición entre planos (horizontal → LARP → RALP)
+                  al cambiar de canal.
+                </div>
                 <ul class="goals-summary">
-                  {#each goals as g (g.acceptanceId)}
-                    <li><b>{g.count}</b> · {levelName(g.acceptanceId)}</li>
+                  {#each goals as g, i (i)}
+                    <li><b>{g.count}</b> · {g.targetChannel} · {levelName(g.acceptanceId)}</li>
                   {/each}
                 </ul>
                 {#if !serial.connected}
@@ -433,17 +418,10 @@
               {#if current}
                 <div class="now">
                   <span class="ro-lab">Objetivo actual</span>
-                  {#if bundle.kind === 'practica-multi' && current.targetChannel}
-                    <b class="big-level">{current.targetChannel} · {CHANNEL_LABELS[current.targetChannel]}</b>
-                    <span class="now-hint">
-                      Nivel: <b>{levelName(current.acceptanceId)}</b> · {planeLabel(current.targetChannel)}
-                    </span>
-                  {:else}
-                    <b class="big-level">{levelName(current.acceptanceId)}</b>
-                    {#if bundle.kind === 'practica-vert'}
-                      <span class="now-hint">Plano vertical · sigue la marca diagonal en la vista superior (LARP o RALP)</span>
-                    {/if}
-                  {/if}
+                  <b class="big-level">{current.targetChannel} · {CHANNEL_LABELS[current.targetChannel]}</b>
+                  <span class="now-hint">
+                    Nivel: <b>{levelName(current.acceptanceId)}</b> · {planeLabel(current.targetChannel)}
+                  </span>
                 </div>
               {/if}
               <div class="actions">
@@ -768,9 +746,7 @@
     font-size: 10px; padding: 2px 8px; border-radius: 999px;
     text-transform: uppercase; letter-spacing: .04em; font-weight: 700;
   }
-  .kind-tag.practica-horiz { background: #fde68a; color: #92400e; }
-  .kind-tag.practica-vert { background: #c7d2fe; color: #3730a3; }
-  .kind-tag.practica-multi { background: #bbf7d0; color: #14532d; }
+  .kind-tag.practica { background: #bbf7d0; color: #14532d; }
 
   .plane-banner {
     margin-top: 8px;
