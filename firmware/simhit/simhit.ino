@@ -2,12 +2,25 @@
 // IMU: L3G4200D (gyro) + LSM303DLHC (accel + mag) sobre I2C
 // Fusión: Madgwick (Adafruit_AHRS) → yaw/pitch/roll
 //
-// Protocolo serial (invariante respecto a versión BNO055):
-//   Salida:  "angX;angY;angZ;gyroX;gyroY;gyroZ\n"  (° y °/s)
+// Protocolo serial:
+//   Salida (formato extendido):
+//     "angX;angY;angZ;gyroX;gyroY;gyroZ;angAccX;angAccY;angAccZ;linAccX;linAccY;linAccZ;tsMs;crc\n"
+//     - 12 floats: pose (°), velocidad angular (°/s), aceleración angular (°/s²),
+//       aceleración lineal del LSM303 (m/s²).
+//     - tsMs: uint32 en ms desde boot (millis()).
+//     - crc: CRC-16 CCITT 0x1021 (init 0xFFFF) hexadecimal, calculado sobre
+//       todo el payload hasta el ';' anterior (sin incluir el ';crc\n' final).
+//   Salida legacy: cuando el firmware previo emitía sólo 6 floats. Cliente
+//   parser tolera ambos formatos.
+//
 //   Entrada: "IMU ON" | "IMU OFF" | "IMU CAL" | "IMU CLR" | "IMU STATUS"
 //            "MAG CAL" | "MAG CLR" | "MAG STATUS"
 //            "LASER ON" | "LASER OFF" | "LASER STATUS"
+//            "FILTER SG" | "FILTER IIR" | "FILTER NONE" | "FILTER STATUS"
 //            "HELLO" | "RESET"
+//
+//   El comando FILTER selecciona el método de cálculo de la aceleración
+//   angular y se persiste en NVS (clave "accelFilt"). Default: SG.
 
 #include <Wire.h>
 #include <Preferences.h>
@@ -68,7 +81,148 @@ float offsetX = 0.0f, offsetY = 0.0f, offsetZ = 0.0f;
 
 uint32_t lastSampleUs = 0;
 
+// --- Aceleración angular calculada en hardware ---
+//
+// La derivada del gyro se calcula con uno de tres métodos seleccionables
+// vía comando "FILTER <SG|IIR|NONE>" y persistente en NVS:
+//   SG   - Savitzky-Golay 5pt, primera derivada: coef [-2,-1,0,1,2]/(10·dt).
+//          Lag inherente: 2 muestras (10 ms a 200 Hz). Suaviza ruido.
+//   IIR  - derivada hacia atrás (xN - xN-1)/dt suavizada por IIR con α=0.3.
+//   NONE - derivada hacia atrás sin filtrado.
+//
+// Las muestras de gyro guardadas en el buffer son °/s (post-bias), de modo
+// que la salida de la derivada queda en °/s² directamente.
+enum AccelFilter { ACCEL_FILT_SG = 0, ACCEL_FILT_IIR = 1, ACCEL_FILT_NONE = 2 };
+AccelFilter accelFilter = ACCEL_FILT_SG;
+
+// Buffer circular de 5 muestras de gyro (°/s), uno por eje. Avanza con cada
+// llamada a sampleAndFuse(). gyroBufFilled cuenta hasta 5 (luego se queda en 5)
+// para saber si hay historia suficiente para SG.
+#define GYRO_BUF_LEN 5
+float gyroBufX[GYRO_BUF_LEN] = {0};
+float gyroBufY[GYRO_BUF_LEN] = {0};
+float gyroBufZ[GYRO_BUF_LEN] = {0};
+uint8_t gyroBufIdx = 0;
+uint8_t gyroBufFilled = 0;
+
+// Estado del filtro IIR (último valor de la derivada filtrada) y de NONE/IIR
+// (última muestra cruda para la derivada hacia atrás).
+float angAccIirX = 0.0f, angAccIirY = 0.0f, angAccIirZ = 0.0f;
+float prevGyroX = 0.0f, prevGyroY = 0.0f, prevGyroZ = 0.0f;
+bool  prevGyroValid = false;
+
+// Aceleración angular calculada en el último sampleAndFuse(), expuesta a
+// emitIMU(). En °/s². Si la historia es insuficiente: 0.
+float angAccX = 0.0f, angAccY = 0.0f, angAccZ = 0.0f;
+
+// Aceleración lineal LSM303 (m/s²), capturada en sampleAndFuse().
+float linAccX = 0.0f, linAccY = 0.0f, linAccZ = 0.0f;
+
+// Última velocidad angular (°/s post-bias) usada por la derivada y emitida
+// por emitIMU(). Coherente con la entrada de computeAngularAccel().
+float lastGyroDpsX = 0.0f, lastGyroDpsY = 0.0f, lastGyroDpsZ = 0.0f;
+
 static inline float radToDeg(float r) { return r * 57.2957795f; }
+
+// CRC-16 CCITT (poly 0x1021, init 0xFFFF, sin reflexión). Calcula sobre los
+// primeros `len` bytes de `data`. Emitido en hex big-endian (Serial.print HEX).
+uint16_t crc16_ccitt(const char* data, size_t len) {
+  uint16_t crc = 0xFFFF;
+  for (size_t i = 0; i < len; i++) {
+    crc ^= ((uint16_t)(uint8_t)data[i]) << 8;
+    for (int b = 0; b < 8; b++) {
+      crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+    }
+  }
+  return crc;
+}
+
+// Calcula la derivada del gyro según el modo activo y la guarda en
+// angAccX/Y/Z. dtSec es el período de muestreo en segundos.
+void computeAngularAccel(float gxDps, float gyDps, float gzDps, float dtSec) {
+  // Push al buffer circular SG (siempre, así si el usuario cambia de modo
+  // en caliente no hay glitches transitorios).
+  gyroBufX[gyroBufIdx] = gxDps;
+  gyroBufY[gyroBufIdx] = gyDps;
+  gyroBufZ[gyroBufIdx] = gzDps;
+  gyroBufIdx = (gyroBufIdx + 1) % GYRO_BUF_LEN;
+  if (gyroBufFilled < GYRO_BUF_LEN) gyroBufFilled++;
+
+  if (accelFilter == ACCEL_FILT_SG) {
+    if (gyroBufFilled < GYRO_BUF_LEN) {
+      // Historia insuficiente en los primeros 4 ticks: emitir 0.
+      angAccX = angAccY = angAccZ = 0.0f;
+      return;
+    }
+    // Reconstruir muestras en orden cronológico [-2, -1, 0, +1, +2] a partir
+    // del buffer circular. La muestra recién insertada está en (idx-1) mod L,
+    // y la más antigua en idx.
+    // Coeficientes SG 5pt 1ª derivada: [-2, -1, 0, 1, 2] / (10·dt).
+    float sx = 0, sy = 0, sz = 0;
+    for (uint8_t k = 0; k < GYRO_BUF_LEN; k++) {
+      // k=0 → más antigua (coef -2); k=4 → más reciente (coef +2).
+      int8_t coef = (int8_t)k - 2;
+      uint8_t pos = (gyroBufIdx + k) % GYRO_BUF_LEN;
+      sx += coef * gyroBufX[pos];
+      sy += coef * gyroBufY[pos];
+      sz += coef * gyroBufZ[pos];
+    }
+    float denom = 10.0f * dtSec;
+    angAccX = sx / denom;
+    angAccY = sy / denom;
+    angAccZ = sz / denom;
+  } else {
+    // IIR o NONE: derivada hacia atrás.
+    if (!prevGyroValid) {
+      angAccX = angAccY = angAccZ = 0.0f;
+      angAccIirX = angAccIirY = angAccIirZ = 0.0f;
+    } else {
+      float dx = (gxDps - prevGyroX) / dtSec;
+      float dy = (gyDps - prevGyroY) / dtSec;
+      float dz = (gzDps - prevGyroZ) / dtSec;
+      if (accelFilter == ACCEL_FILT_IIR) {
+        const float alpha = 0.3f;
+        angAccIirX = alpha * dx + (1.0f - alpha) * angAccIirX;
+        angAccIirY = alpha * dy + (1.0f - alpha) * angAccIirY;
+        angAccIirZ = alpha * dz + (1.0f - alpha) * angAccIirZ;
+        angAccX = angAccIirX;
+        angAccY = angAccIirY;
+        angAccZ = angAccIirZ;
+      } else { // NONE
+        angAccX = dx;
+        angAccY = dy;
+        angAccZ = dz;
+      }
+    }
+    prevGyroX = gxDps;
+    prevGyroY = gyDps;
+    prevGyroZ = gzDps;
+    prevGyroValid = true;
+  }
+}
+
+const char* accelFilterName(AccelFilter f) {
+  switch (f) {
+    case ACCEL_FILT_SG:   return "SG";
+    case ACCEL_FILT_IIR:  return "IIR";
+    case ACCEL_FILT_NONE: return "NONE";
+  }
+  return "SG";
+}
+
+void saveAccelFilter() {
+  prefs.begin("simhit", false);
+  prefs.putUChar("accelFilt", (uint8_t)accelFilter);
+  prefs.end();
+}
+
+void loadAccelFilter() {
+  prefs.begin("simhit", true);
+  uint8_t v = prefs.getUChar("accelFilt", (uint8_t)ACCEL_FILT_SG);
+  prefs.end();
+  if (v <= (uint8_t)ACCEL_FILT_NONE) accelFilter = (AccelFilter)v;
+  else accelFilter = ACCEL_FILT_SG;
+}
 
 // Lee 1 byte de un registro por I2C. Retorna -1 en error.
 int readReg8(uint8_t addr, uint8_t reg) {
@@ -180,6 +334,9 @@ void setup() {
 
   // Bias gyro y orientación: session-only, requiere "IMU CAL" tras conectar.
   loadMagCal();
+  loadAccelFilter();
+  Serial.print("Accel filter = ");
+  Serial.println(accelFilterName(accelFilter));
 
   lastSampleUs = micros();
   Serial.println("SimHit start");
@@ -212,6 +369,18 @@ void sampleAndFuse() {
   float gy_dps = radToDeg(gry - gy_bias);
   float gz_dps = radToDeg(grz - gz_bias);
 
+  // Aceleración angular calculada en hardware. dt = 1/SAMPLE_RATE_HZ (5 ms).
+  computeAngularAccel(gx_dps, gy_dps, gz_dps, 1.0f / SAMPLE_RATE_HZ);
+  lastGyroDpsX = gx_dps;
+  lastGyroDpsY = gy_dps;
+  lastGyroDpsZ = gz_dps;
+
+  // Aceleración lineal del LSM303 (m/s²). Sin filtro adicional: el sensor
+  // ya filtra internamente. Se almacena para emitIMU().
+  linAccX = ae.acceleration.x;
+  linAccY = ae.acceleration.y;
+  linAccZ = ae.acceleration.z;
+
   float mx = (me.magnetic.x - mx_off) * mx_scl;
   float my = (me.magnetic.y - my_off) * my_scl;
   float mz = (me.magnetic.z - mz_off) * mz_scl;
@@ -236,12 +405,12 @@ void sampleAndFuse() {
 }
 
 void emitIMU() {
-  // Re-leer gyro para emitir velocidad angular instantánea fresca
-  float grx, gry, grz;
-  l3gRead(grx, gry, grz);
-  float gx_dps = radToDeg(grx - gx_bias);
-  float gy_dps = radToDeg(gry - gy_bias);
-  float gz_dps = radToDeg(grz - gz_bias);
+  // Usar la última lectura de gyro y aceleración hechas en sampleAndFuse():
+  // así emit y derivada son coherentes (misma muestra) y se evita una
+  // lectura I2C adicional por tick.
+  float gx_dps = lastGyroDpsX;
+  float gy_dps = lastGyroDpsY;
+  float gz_dps = lastGyroDpsZ;
 
   float yaw   = filter.getYaw()   - yaw_off;
   float pitch = filter.getPitch() - pitch_off;
@@ -255,17 +424,34 @@ void emitIMU() {
   prevAngleY = pitch;
   prevAngleZ = roll;
 
-  Serial.print(adjustedAngleX, 2);
-  Serial.print(";");
-  Serial.print(adjustedAngleY, 2);
-  Serial.print(";");
-  Serial.print(adjustedAngleZ, 2);
-  Serial.print(";");
-  Serial.print(gx_dps, 2);
-  Serial.print(";");
-  Serial.print(gy_dps, 2);
-  Serial.print(";");
-  Serial.println(gz_dps, 2);
+  uint32_t now_ms = millis();
+
+  // Armar payload completo (sin CRC) en un buffer para calcular CRC-16 sobre
+  // el mismo bytestream que el cliente verá. snprintf con %.2f mantiene la
+  // precisión histórica (2 decimales). Tamaño de buffer holgado para 12
+  // floats + ts: 160 bytes es seguro (~12·12 + 12 + márgenes).
+  char line[160];
+  int n = snprintf(line, sizeof(line),
+    "%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%lu",
+    adjustedAngleX, adjustedAngleY, adjustedAngleZ,
+    gx_dps, gy_dps, gz_dps,
+    angAccX, angAccY, angAccZ,
+    linAccX, linAccY, linAccZ,
+    (unsigned long)now_ms);
+  if (n < 0 || n >= (int)sizeof(line)) {
+    // Truncamiento improbable: descartar la línea para no enviar CRC mal calculado.
+    return;
+  }
+  uint16_t crc = crc16_ccitt(line, (size_t)n);
+
+  // Emitir todo en una sola línea, sin flush intermedio.
+  Serial.print(line);
+  Serial.print(';');
+  // Imprimir CRC como hex de 4 dígitos en mayúsculas, padding con ceros.
+  if (crc < 0x1000) Serial.print('0');
+  if (crc < 0x0100) Serial.print('0');
+  if (crc < 0x0010) Serial.print('0');
+  Serial.println(crc, HEX);
 }
 
 float adjustDiscontinuity(float currentAngle, float prevAngle, float &offset) {
@@ -308,6 +494,26 @@ void handleCommand(String command) {
   } else if (command == "LASER STATUS") {
     Serial.print("LASER STATUS ");
     Serial.println(laser_on ? "ON" : "OFF");
+  } else if (command == "FILTER SG") {
+    accelFilter = ACCEL_FILT_SG;
+    prevGyroValid = false;
+    angAccIirX = angAccIirY = angAccIirZ = 0.0f;
+    saveAccelFilter();
+    Serial.println("FILTER SG");
+  } else if (command == "FILTER IIR") {
+    accelFilter = ACCEL_FILT_IIR;
+    prevGyroValid = false;
+    angAccIirX = angAccIirY = angAccIirZ = 0.0f;
+    saveAccelFilter();
+    Serial.println("FILTER IIR");
+  } else if (command == "FILTER NONE") {
+    accelFilter = ACCEL_FILT_NONE;
+    prevGyroValid = false;
+    saveAccelFilter();
+    Serial.println("FILTER NONE");
+  } else if (command == "FILTER STATUS") {
+    Serial.print("FILTER STATUS ");
+    Serial.println(accelFilterName(accelFilter));
   } else if (command == "HELLO") {
     Serial.println("HELLO");
   } else if (command == "RESET") {
