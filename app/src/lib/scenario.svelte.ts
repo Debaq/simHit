@@ -239,16 +239,17 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-function buildCase(
+function buildCaseFull(
   idSuffix: string,
   name: string,
   description: string,
-  ll: Partial<ChannelConfig>,
-  rl: Partial<ChannelConfig>,
+  channelsPatch: Partial<Record<Channel, Partial<ChannelConfig>>>,
 ): Scenario {
   const channels = emptyChannels();
-  channels.LL = { ...defaultChannelConfig(), ...ll };
-  channels.RL = { ...defaultChannelConfig(), ...rl };
+  for (const k of CHANNELS) {
+    const patch = channelsPatch[k];
+    if (patch) channels[k] = { ...defaultChannelConfig(), ...patch };
+  }
   return {
     id: `example-${idSuffix}`,
     name,
@@ -258,38 +259,139 @@ function buildCase(
   };
 }
 
+// Valores normales explícitos reutilizables para canales no patológicos.
+const NORMAL: Partial<ChannelConfig> = { gain: 0.95, peakVel: 180, saccade: 'none' };
+const NORMALS_4V: Partial<Record<Channel, Partial<ChannelConfig>>> = {
+  LA: NORMAL, RP: NORMAL, RA: NORMAL, LP: NORMAL,
+};
+
 function buildExampleCases(): Scenario[] {
   return [
-    buildCase('1', '1. Normal bilateral', 'VOR normal en ambos lados (gain ~0.95). Sin sacadas correctivas.',
-      { gain: 0.95, peakVel: 180, saccade: 'none' },
-      { gain: 0.95, peakVel: 180, saccade: 'none' }),
-    buildCase('2', '2. Hipofunción derecha — overt', 'Pérdida vestibular derecha clásica con sacadas manifiestas.',
-      { gain: 0.95, peakVel: 180, saccade: 'none' },
-      { gain: 0.4,  peakVel: 180, saccade: 'overt' }),
-    buildCase('3', '3. Hipofunción izquierda — overt', 'Pérdida vestibular izquierda con sacadas manifiestas.',
-      { gain: 0.4,  peakVel: 180, saccade: 'overt' },
-      { gain: 0.95, peakVel: 180, saccade: 'none' }),
-    buildCase('4', '4. Hipofunción derecha — covert', 'Hipofunción derecha compensada con sacadas cubiertas (sutil).',
-      { gain: 0.95, peakVel: 180, saccade: 'none' },
-      { gain: 0.55, peakVel: 180, saccade: 'covert' }),
-    buildCase('5', '5. Bilateral parcial', 'Hipofunción bilateral simétrica (gain ~0.5 ambos).',
-      { gain: 0.5, peakVel: 180, saccade: 'overt' },
-      { gain: 0.5, peakVel: 180, saccade: 'overt' }),
-    buildCase('6', '6. Hipofunción severa derecha', 'Pérdida casi total derecha con sacadas overt amplias.',
-      { gain: 0.95, peakVel: 200, saccade: 'none' },
-      { gain: 0.2,  peakVel: 200, saccade: 'overt' }),
-    buildCase('7', '7. Hipofunción leve izquierda', 'Pérdida leve izquierda con sacadas covert ocasionales.',
-      { gain: 0.75, peakVel: 170, saccade: 'covert' },
-      { gain: 0.95, peakVel: 170, saccade: 'none' }),
-    buildCase('8', '8. Compensación post-aguda', 'Mezcla de sacadas covert y overt; hipofunción derecha en compensación.',
-      { gain: 0.95, peakVel: 180, saccade: 'none' },
-      { gain: 0.6,  peakVel: 180, saccade: 'covert' }),
-    buildCase('9', '9. Examen con artefactos', 'Patrón normal contaminado por parpadeos y deslizamiento de gafas.',
-      { gain: 0.95, peakVel: 180, saccade: 'none', artifacts: [{ artifact: 'blink', probability: 0.4 }] },
-      { gain: 0.95, peakVel: 180, saccade: 'none', artifacts: [{ artifact: 'slip', probability: 0.3 }] }),
-    buildCase('10', '10. Mixto progresivo', 'Hipofunción izquierda moderada con normal a la derecha.',
-      { gain: 0.5,  peakVel: 180, saccade: 'overt' },
-      { gain: 0.95, peakVel: 180, saccade: 'none' }),
+    buildCaseFull('1', '1. Normal bilateral',
+      'VOR normal en los 6 canales (gain ~0.95). Sin sacadas correctivas.',
+      {
+        LL: { gain: 0.95, peakVel: 180, saccade: 'none' },
+        RL: { gain: 0.95, peakVel: 180, saccade: 'none' },
+        ...NORMALS_4V,
+      }),
+    buildCaseFull('2', '2. Hipofunción derecha — overt',
+      'Pérdida vestibular derecha del canal lateral con sacadas manifiestas. Verticales conservados.',
+      {
+        LL: { gain: 0.95, peakVel: 180, saccade: 'none' },
+        RL: { gain: 0.4,  peakVel: 180, saccade: 'overt' },
+        ...NORMALS_4V,
+      }),
+    buildCaseFull('3', '3. Hipofunción izquierda — overt',
+      'Pérdida vestibular izquierda del canal lateral con sacadas manifiestas. Verticales conservados.',
+      {
+        LL: { gain: 0.4,  peakVel: 180, saccade: 'overt' },
+        RL: { gain: 0.95, peakVel: 180, saccade: 'none' },
+        ...NORMALS_4V,
+      }),
+    buildCaseFull('4', '4. Hipofunción derecha — covert',
+      'Hipofunción derecha lateral compensada con sacadas cubiertas (sutil). Verticales conservados.',
+      {
+        LL: { gain: 0.95, peakVel: 180, saccade: 'none' },
+        RL: { gain: 0.55, peakVel: 180, saccade: 'covert' },
+        ...NORMALS_4V,
+      }),
+    buildCaseFull('5', '5. Bilateral parcial',
+      'Hipofunción bilateral simétrica que afecta ambos órganos completos: laterales y verticales con gain reducido.',
+      {
+        LL: { gain: 0.5,  peakVel: 180, saccade: 'overt' },
+        RL: { gain: 0.5,  peakVel: 180, saccade: 'overt' },
+        LA: { gain: 0.55, peakVel: 180, saccade: 'overt' },
+        RP: { gain: 0.55, peakVel: 180, saccade: 'overt' },
+        RA: { gain: 0.55, peakVel: 180, saccade: 'overt' },
+        LP: { gain: 0.55, peakVel: 180, saccade: 'overt' },
+      }),
+    buildCaseFull('6', '6. Hipofunción severa derecha',
+      'Pérdida casi total del lateral derecho con sacadas overt amplias. Verticales conservados.',
+      {
+        LL: { gain: 0.95, peakVel: 200, saccade: 'none' },
+        RL: { gain: 0.2,  peakVel: 200, saccade: 'overt' },
+        ...NORMALS_4V,
+      }),
+    buildCaseFull('7', '7. Hipofunción leve izquierda',
+      'Pérdida leve del lateral izquierdo con sacadas covert ocasionales. Verticales conservados.',
+      {
+        LL: { gain: 0.75, peakVel: 170, saccade: 'covert' },
+        RL: { gain: 0.95, peakVel: 170, saccade: 'none' },
+        ...NORMALS_4V,
+      }),
+    buildCaseFull('8', '8. Compensación post-aguda',
+      'Mezcla de sacadas covert y overt; hipofunción lateral derecha en fase de compensación. Verticales conservados.',
+      {
+        LL: { gain: 0.95, peakVel: 180, saccade: 'none' },
+        RL: { gain: 0.6,  peakVel: 180, saccade: 'covert' },
+        ...NORMALS_4V,
+      }),
+    buildCaseFull('9', '9. Examen con artefactos',
+      'Patrón normal contaminado por parpadeos y deslizamiento de gafas en los 6 canales.',
+      {
+        LL: { gain: 0.95, peakVel: 180, saccade: 'none', artifacts: [{ artifact: 'blink', probability: 0.4 }] },
+        RL: { gain: 0.95, peakVel: 180, saccade: 'none', artifacts: [{ artifact: 'slip',  probability: 0.3 }] },
+        LA: { gain: 0.95, peakVel: 180, saccade: 'none', artifacts: [{ artifact: 'blink', probability: 0.2 }] },
+        RP: { gain: 0.95, peakVel: 180, saccade: 'none', artifacts: [{ artifact: 'slip',  probability: 0.2 }] },
+        RA: { gain: 0.95, peakVel: 180, saccade: 'none', artifacts: [{ artifact: 'blink', probability: 0.2 }] },
+        LP: { gain: 0.95, peakVel: 180, saccade: 'none', artifacts: [{ artifact: 'slip',  probability: 0.2 }] },
+      }),
+    buildCaseFull('10', '10. Mixto progresivo',
+      'Hipofunción lateral izquierda moderada con lateral derecho normal. Verticales conservados.',
+      {
+        LL: { gain: 0.5,  peakVel: 180, saccade: 'overt' },
+        RL: { gain: 0.95, peakVel: 180, saccade: 'none' },
+        ...NORMALS_4V,
+      }),
+    // ── Casos verticales / multicanal (issue #13) ──
+    buildCaseFull('11', '11. Hipofunción canal posterior derecho (RP)',
+      'Déficit aislado del conducto semicircular posterior derecho con sacadas manifiestas en el plano RALP. Resto de canales conservados.',
+      {
+        LL: NORMAL, RL: NORMAL, LA: NORMAL, RA: NORMAL, LP: NORMAL,
+        RP: { gain: 0.4, peakVel: 180, saccade: 'overt' },
+      }),
+    buildCaseFull('12', '12. Hipofunción canal anterior izquierdo (LA)',
+      'Déficit aislado del conducto semicircular anterior izquierdo con sacadas manifiestas en el plano LARP. Resto de canales conservados.',
+      {
+        LL: NORMAL, RL: NORMAL, RP: NORMAL, RA: NORMAL, LP: NORMAL,
+        LA: { gain: 0.4, peakVel: 180, saccade: 'overt' },
+      }),
+    buildCaseFull('13', '13. Hipofunción canal anterior derecho (RA)',
+      'Déficit aislado del conducto semicircular anterior derecho con sacadas manifiestas en el plano RALP. Resto de canales conservados.',
+      {
+        LL: NORMAL, RL: NORMAL, LA: NORMAL, RP: NORMAL, LP: NORMAL,
+        RA: { gain: 0.4, peakVel: 180, saccade: 'overt' },
+      }),
+    buildCaseFull('14', '14. Hipofunción canal posterior izquierdo (LP)',
+      'Déficit aislado del conducto semicircular posterior izquierdo con sacadas manifiestas en el plano LARP. Resto de canales conservados.',
+      {
+        LL: NORMAL, RL: NORMAL, LA: NORMAL, RP: NORMAL, RA: NORMAL,
+        LP: { gain: 0.4, peakVel: 180, saccade: 'overt' },
+      }),
+    buildCaseFull('15', '15. Hipofunción plano RALP',
+      'Compromiso del plano RALP: anterior derecho y posterior izquierdo con sacadas manifiestas. Laterales y plano LARP conservados.',
+      {
+        LL: NORMAL, RL: NORMAL, LA: NORMAL, RP: NORMAL,
+        RA: { gain: 0.45, peakVel: 180, saccade: 'overt' },
+        LP: { gain: 0.45, peakVel: 180, saccade: 'overt' },
+      }),
+    buildCaseFull('16', '16. Hipofunción plano LARP',
+      'Compromiso del plano LARP: anterior izquierdo y posterior derecho con sacadas manifiestas. Laterales y plano RALP conservados.',
+      {
+        LL: NORMAL, RL: NORMAL, RA: NORMAL, LP: NORMAL,
+        LA: { gain: 0.45, peakVel: 180, saccade: 'overt' },
+        RP: { gain: 0.45, peakVel: 180, saccade: 'overt' },
+      }),
+    buildCaseFull('17', '17. Hipofunción global 6 canales',
+      'Pérdida vestibular bilateral total: los 6 conductos con gain marcadamente reducido y sacadas manifiestas en todos los planos.',
+      {
+        LL: { gain: 0.4, peakVel: 180, saccade: 'overt' },
+        RL: { gain: 0.4, peakVel: 180, saccade: 'overt' },
+        LA: { gain: 0.4, peakVel: 180, saccade: 'overt' },
+        RP: { gain: 0.4, peakVel: 180, saccade: 'overt' },
+        RA: { gain: 0.4, peakVel: 180, saccade: 'overt' },
+        LP: { gain: 0.4, peakVel: 180, saccade: 'overt' },
+      }),
   ];
 }
 
