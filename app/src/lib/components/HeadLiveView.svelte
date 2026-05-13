@@ -1,7 +1,16 @@
 <script lang="ts">
-  import { sim } from '$lib/simulator.svelte';
+  import { sim, type ImpulseSide } from '$lib/simulator.svelte';
   import { serial, type Axis, type AxesConfig } from '$lib/serial.svelte';
   import { acceptance } from '$lib/acceptance.svelte';
+  import { CHANNEL_LABELS } from '$lib/scenario.svelte';
+
+  // Etiqueta de lado del impulso para el HUD. Mapea los 6 canales a
+  // izquierda/derecha (la pertenencia al plano vertical no se muestra aquí —
+  // queda como TODO[#13 F0.5] para la marca diagonal en HeadLiveView).
+  function sideClass(s: ImpulseSide | undefined): 'left' | 'right' | '' {
+    if (!s) return '';
+    return s.startsWith('L') ? 'left' : 'right';
+  }
 
   let { impulseLayout = 'compact' as 'compact' | 'prominent' } = $props();
 
@@ -468,7 +477,7 @@
       <div class="panel-title impulse-title">
         <span>Último impulso</span>
         {#if last}
-          <span class="side-chip {last.side === 'LL' ? 'll' : 'rl'}">{last.side}</span>
+          <span class="side-chip {sideClass(last.side)}" title={CHANNEL_LABELS[last.side]}>{last.side}</span>
           <span class="muted small">#{last.id}</span>
         {/if}
         {#if verdict}
@@ -484,7 +493,7 @@
           <div class="prom-meta">
             <div class="prom-title">{verdict.ok ? 'Impulso correcto' : 'Impulso fuera de rango'}</div>
             <div class="prom-sub">
-              Lado {last.side === 'LL' ? 'Izquierdo' : 'Derecho'} · {verdict.levelName}
+              {CHANNEL_LABELS[last.side]} ({last.side}) · {verdict.levelName}
             </div>
           </div>
         </div>
@@ -529,7 +538,7 @@
       <div class="panel-title impulse-title">
         <span>Último impulso</span>
         {#if last}
-          <span class="side-chip {last.side === 'LL' ? 'll' : 'rl'}">{last.side}</span>
+          <span class="side-chip {sideClass(last.side)}" title={CHANNEL_LABELS[last.side]}>{last.side}</span>
           <span class="muted small">#{last.id}</span>
         {/if}
         {#if verdict}
@@ -800,8 +809,8 @@
     color: white; font-size: 10px; font-weight: 700; letter-spacing: .04em;
     padding: 1px 6px; border-radius: 3px;
   }
-  .side-chip.ll { background: var(--side-ll); }
-  .side-chip.rl { background: var(--side-rl); }
+  .side-chip.left  { background: var(--side-ll); }
+  .side-chip.right { background: var(--side-rl); }
 
   .level-chip {
     margin-left: auto;

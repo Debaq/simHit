@@ -4,9 +4,9 @@
   import HeadLiveView from '$lib/components/HeadLiveView.svelte';
   import TraceChart from '$lib/components/TraceChart.svelte';
   import TraceReview from '$lib/components/TraceReview.svelte';
-  import { sim } from '$lib/simulator.svelte';
+  import { sim, isHorizontalSide } from '$lib/simulator.svelte';
   import { serial } from '$lib/serial.svelte';
-  import { scenarios } from '$lib/scenario.svelte';
+  import { scenarios, CHANNEL_LABELS } from '$lib/scenario.svelte';
   import { bundles } from '$lib/bundle.svelte';
   import { acceptance } from '$lib/acceptance.svelte';
   import { practice } from '$lib/practice.svelte';
@@ -68,8 +68,7 @@
   let selectedChecks = $derived.by(() => {
     if (!selected || !selectedPreset) return null;
     const p = selectedPreset;
-    const isHoriz = selected.side === 'LL' || selected.side === 'RL';
-    const ampMax = isHoriz ? p.yawTol : p.pitchTol;
+    const ampMax = isHorizontalSide(selected.side) ? p.yawTol : p.pitchTol;
     return {
       peak: selected.peak >= p.peakMin && selected.peak <= p.peakMax,
       gain: selected.gain >= p.gainMin && selected.gain <= p.gainMax,
@@ -274,13 +273,6 @@
         <p>El escenario activo no es de práctica. Crea o activa uno desde <a href="/docente">Modo docente</a>.</p>
       </div>
     </main>
-  {:else if bundle.kind === 'practica-vert'}
-    <main class="layout">
-      <div class="empty-state">
-        <h2>Práctica vertical no disponible</h2>
-        <p>El sensor no detecta impulsos verticales todavía. Esta modalidad estará disponible cuando el firmware capture pitch.</p>
-      </div>
-    </main>
   {:else}
     <main class="layout">
       <section class="row top">
@@ -300,6 +292,13 @@
                   Configurado: <b>{goalCount}</b> {bundle.mode === 'hits' ? 'aciertos' : 'intentos'}
                   · orden <b>{bundle.order === 'sequential' ? 'secuencial' : 'aleatorio'}</b>
                 </p>
+                {#if bundle.kind === 'practica-vert'}
+                  <div class="vert-hint">
+                    🧭 <b>Práctica vertical (planos LARP / RALP).</b>
+                    Posiciona la cabeza girada ~45° a izquierda (LARP: LA / RP) o a derecha (RALP: RA / LP)
+                    antes de cada impulso. El canal se identifica automáticamente según la pose y la dirección del impulso.
+                  </div>
+                {/if}
                 <ul class="goals-summary">
                   {#each goals as g (g.acceptanceId)}
                     <li><b>{g.count}</b> · {levelName(g.acceptanceId)}</li>
@@ -343,6 +342,10 @@
                 <div class="now">
                   <span class="ro-lab">Objetivo actual</span>
                   <b class="big-level">{levelName(current.acceptanceId)}</b>
+                  {#if bundle.kind === 'practica-vert'}
+                    <!-- TODO[#13 F0.5]: marca diagonal de pose objetivo en HeadLiveView (LARP/RALP a ±45°). -->
+                    <span class="now-hint">Plano vertical · cabeza girada ~45° (LARP o RALP)</span>
+                  {/if}
                 </div>
               {/if}
               <div class="actions">
@@ -551,7 +554,7 @@
             <span class="trv-pos">{selectedIdx + 1} / {practice.attempts.length}</span>
           </h3>
           <div class="trv-sub">
-            {levelName(selected.acceptanceId)} · {selected.side} ·
+            {levelName(selected.acceptanceId)} · {CHANNEL_LABELS[selected.side]} ({selected.side}) ·
             <span class="trv-tag {selected.ok ? 'ok' : 'bad'}">{selected.ok ? '✓ OK' : '✗ Fuera'}</span>
           </div>
         </div>
@@ -679,6 +682,17 @@
     color: #92400e; font-size: 13px; line-height: 1.4;
   }
   .hw-warn b { color: #78350f; }
+  .vert-hint {
+    padding: 10px 14px;
+    background: #eef2ff; border: 1px solid #c7d2fe;
+    border-radius: var(--radius-sm);
+    color: #3730a3; font-size: 12px; line-height: 1.45;
+  }
+  .vert-hint b { color: #1e1b4b; }
+  .now-hint {
+    font-size: 11px; color: var(--text-muted);
+    margin-top: 2px;
+  }
 
   .progress { margin-bottom: 12px; }
   .prog-row { display: flex; justify-content: space-between; font-size: 13px; }
