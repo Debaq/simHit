@@ -217,6 +217,7 @@
               <th>Paciente</th>
               <th>Gain LL</th>
               <th>Gain RL</th>
+              <th title="Promedio de ganancia de los 4 canales verticales con datos">Verticales</th>
               <th>Diagnóstico</th>
               <th>Estado</th>
               <th></th>
@@ -224,13 +225,25 @@
           </thead>
           <tbody>
             {#each simFiltered as r (r.id)}
+              {@const vertSamples = [
+                { g: r.gainLA, n: r.countLA },
+                { g: r.gainRP, n: r.countRP },
+                { g: r.gainRA, n: r.countRA },
+                { g: r.gainLP, n: r.countLP },
+              ].filter((x) => x.n > 0)}
+              {@const vertAvg = vertSamples.length
+                ? vertSamples.reduce((a, x) => a + x.g, 0) / vertSamples.length
+                : null}
               <tr>
                 <td>{fmt(r.date)}</td>
                 <td><code>{r.examenCode}</code></td>
                 <td>{r.examiner || '—'}</td>
                 <td>{r.patientName || '—'}</td>
-                <td style:color={gainColor(r.gainLL)}>{r.gainLL.toFixed(2)}</td>
-                <td style:color={gainColor(r.gainRL)}>{r.gainRL.toFixed(2)}</td>
+                <td style:color={gainColor(r.gainLL)}>{r.countLL ? r.gainLL.toFixed(2) : '—'}</td>
+                <td style:color={gainColor(r.gainRL)}>{r.countRL ? r.gainRL.toFixed(2) : '—'}</td>
+                <td style:color={vertAvg != null ? gainColor(vertAvg) : 'inherit'}>
+                  {vertAvg != null ? vertAvg.toFixed(2) : '—'}
+                </td>
                 <td>{r.diagnosis ? DIAGNOSIS_LABELS[r.diagnosis] : '—'}</td>
                 <td>
                   {#if r.submitted}<span class="tag submitted">Enviado</span>{:else}<span class="tag draft">Borrador</span>{/if}

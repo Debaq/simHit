@@ -5,7 +5,7 @@
   import TopBar from '$lib/components/TopBar.svelte';
   import ImpulsePlotStatic from '$lib/components/ImpulsePlotStatic.svelte';
   import ImpulseModal from '$lib/components/ImpulseModal.svelte';
-  import { reports, DIAGNOSIS_LABELS, emptyFindings, type Report, type Diagnosis, type Side } from '$lib/report.svelte';
+  import { reports, DIAGNOSIS_LABELS, emptyFindings, REPORT_ALL_SIDES, SIDE_LABELS, type Report, type Diagnosis, type Side } from '$lib/report.svelte';
   import { scenarios } from '$lib/scenario.svelte';
   import { ui } from '$lib/dialog.svelte';
 
@@ -13,11 +13,38 @@
   let modalSide = $state<Side>('LL');
   function openModal(s: Side) { modalSide = s; modalOpen = true; }
 
-  // Canales disponibles. Hoy LL/RL; futuro multicanal: añadir LA/RA/LP/RP aquí.
-  const CHANNELS: { id: Side; label: string; color?: string }[] = [
-    { id: 'LL', label: 'Lateral izquierdo' },
-    { id: 'RL', label: 'Lateral derecho' },
+  // Los 6 canales (#13). Agrupados por plano para mantener la lectura clínica
+  // (LL/RL → horizontal · LA/RP → LARP · RA/LP → RALP).
+  const CHANNELS: { id: Side; label: string; color?: string }[] = REPORT_ALL_SIDES.map((id) => ({
+    id, label: SIDE_LABELS[id],
+  }));
+
+  /** Grupos por plano para layout de tabla y plots. */
+  const CHANNEL_GROUPS: { name: string; ids: Side[] }[] = [
+    { name: 'Horizontal', ids: ['LL', 'RL'] },
+    { name: 'LARP', ids: ['LA', 'RP'] },
+    { name: 'RALP', ids: ['RA', 'LP'] },
   ];
+
+  /** Ganancia/recuento por canal en el report (helpers tipados). */
+  function gainOf(r: Report, s: Side): number {
+    switch (s) {
+      case 'LL': return r.gainLL; case 'RL': return r.gainRL;
+      case 'LA': return r.gainLA; case 'RP': return r.gainRP;
+      case 'RA': return r.gainRA; case 'LP': return r.gainLP;
+    }
+  }
+  function countOf(r: Report, s: Side): number {
+    switch (s) {
+      case 'LL': return r.countLL; case 'RL': return r.countRL;
+      case 'LA': return r.countLA; case 'RP': return r.countRP;
+      case 'RA': return r.countRA; case 'LP': return r.countLP;
+    }
+  }
+  function sideChipClass(s: Side): 'll' | 'rl' {
+    // Reutilizamos colores existentes: izquierdos → ll, derechos → rl.
+    return s.startsWith('L') ? 'll' : 'rl';
+  }
 
   let report = $state<Report | null>(null);
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -54,7 +81,7 @@
     return 'Severamente reducida';
   }
 
-  function impulsesOf(side: 'LL' | 'RL') {
+  function impulsesOf(side: Side) {
     return report?.impulses.filter((i) => i.side === side) ?? [];
   }
 
@@ -222,39 +249,53 @@
           <h2>Resultados cuantitativos</h2>
           <table class="result-table">
             <thead>
-              <tr><th>Lado</th><th>Impulsos</th><th>Ganancia VOR</th><th>Interpretación</th></tr>
+              <tr><th>Canal</th><th>Plano</th><th>Impulsos</th><th>Ganancia VOR</th><th>Interpretación</th></tr>
             </thead>
             <tbody>
-              <tr>
-                <td><span class="side-chip ll">LL</span> Lateral izquierdo</td>
-                <td>{report.countLL}</td>
-                <td style:color={gainColor(report.gainLL)}><b>{report.countLL ? report.gainLL.toFixed(2) : '—'}</b></td>
-                <td>{report.countLL ? gainText(report.gainLL) : '—'}</td>
-              </tr>
-              <tr>
-                <td><span class="side-chip rl">RL</span> Lateral derecho</td>
-                <td>{report.countRL}</td>
-                <td style:color={gainColor(report.gainRL)}><b>{report.countRL ? report.gainRL.toFixed(2) : '—'}</b></td>
-                <td>{report.countRL ? gainText(report.gainRL) : '—'}</td>
-              </tr>
+              {#each CHANNEL_GROUPS as grp (grp.name)}
+                {#each grp.ids as id (id)}
+                  {@const cnt = countOf(report, id)}
+                  {@const g = gainOf(report, id)}
+                  <tr>
+                    <td><span class="side-chip {sideChipClass(id)}">{id}</span> {SIDE_LABELS[id]}</td>
+                    <td class="muted small">{grp.name}</td>
+                    <td>{cnt}</td>
+                    <td style:color={gainColor(g)}><b>{cnt ? g.toFixed(2) : '—'}</b></td>
+                    <td>{cnt ? gainText(g) : '—'}</td>
+                  </tr>
+                {/each}
+              {/each}
             </tbody>
           </table>
         </section>
 
         <section class="plots">
-          <h2>Gráficos por lado</h2>
-          <div class="grid-2">
-            <button class="plot-card" onclick={() => openModal('LL')} title="Click: análisis detallado">
-              <div class="plot-title"><span class="side-chip ll">LL</span> Lateral izquierdo <span class="muted">· click ↗</span></div>
-              <ImpulsePlotStatic side="LL" impulses={impulsesOf('LL')} />
-            </button>
-            <button class="plot-card" onclick={() => openModal('RL')} title="Click: análisis detallado">
-              <div class="plot-title"><span class="side-chip rl">RL</span> Lateral derecho <span class="muted">· click ↗</span></div>
-              <ImpulsePlotStatic side="RL" impulses={impulsesOf('RL')} />
-            </button>
-          </div>
+          <h2>Gráficos por canal</h2>
+          {#each CHANNEL_GROUPS as grp (grp.name)}
+            <div class="plane-label">{grp.name}</div>
+            <div class="grid-2">
+              {#each grp.ids as id (id)}
+                {@const items = impulsesOf(id)}
+                <button class="plot-card" onclick={() => openModal(id)} title="Click: análisis detallado">
+                  <div class="plot-title">
+                    <span class="side-chip {sideChipClass(id)}">{id}</span>
+                    {SIDE_LABELS[id]}
+                    <span class="muted">· click ↗</span>
+                  </div>
+                  {#if items.length === 0}
+                    <div class="empty-plot muted small">Sin impulsos en este canal</div>
+                  {:else}
+                    <ImpulsePlotStatic side={id} impulses={items} />
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          {/each}
         </section>
 
+        <!-- TODO[#13 F8]: ampliar `Findings`/`Diagnosis` para hipofunción anterior /
+             posterior izq/der (multicanal). Hoy el cuadro de hallazgos sólo
+             cubre el plano horizontal (LL/RL). -->
         <section class="findings">
           <h2>Hallazgos</h2>
           <div class="check-grid">
@@ -449,6 +490,18 @@
   .plot-card:hover { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
   .plot-title { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
   .plot-title .muted { color: var(--text-muted); font-weight: 400; font-size: 11px; }
+  .plane-label {
+    grid-column: 1 / -1;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text-muted); font-weight: 700;
+    margin: 6px 0 2px;
+  }
+  .plane-label:first-child { margin-top: 0; }
+  .empty-plot {
+    display: flex; align-items: center; justify-content: center;
+    height: 110px; border: 1px dashed var(--border-strong); border-radius: 4px;
+    color: var(--text-muted);
+  }
 
   .check-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 13px; }
   .check-grid label { flex-direction: row; align-items: center; gap: 6px; }
