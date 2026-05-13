@@ -4,6 +4,8 @@ import { eyeset } from '$lib/eyeset.svelte';
 import { serial } from '$lib/serial.svelte';
 import { acceptance } from '$lib/acceptance.svelte';
 import { settings } from '$lib/settings.svelte';
+import { evaluateImpulsePipeline } from '$lib/detectors/evaluator';
+import type { DetectorResult } from '$lib/detectors/types';
 
 /** Canal del impulso. Hasta F1 sólo se generaban LL/RL; ahora también
  *  pueden producirse impulsos verticales (LA/LP/RA/RP) cuando la cabeza
@@ -112,6 +114,11 @@ export interface Verdict {
   durMs: number;
   levelName: string;
   checks: Check[];
+  /** True si la pose inicial del impulso estaba fuera de tolerancia.
+   *  En modo examen el impulso se registra pero no cuenta como válido. */
+  invalidPose: boolean;
+  /** Resultados crudos del pipeline de detectores (para revisor extendido). */
+  detectorResults: DetectorResult[];
 }
 
 /** True si el canal pertenece al plano horizontal (LL/RL). */
@@ -119,36 +126,66 @@ export function isHorizontalSide(s: ImpulseSide): boolean {
   return s === 'LL' || s === 'RL';
 }
 
-function evaluateImpulse(imp: Impulse, peakHead: number, gain: number): Verdict {
+function evaluateImpulse(
+  imp: Impulse,
+  peakHead: number,
+  gain: number,
+  preImpulsePose?: { yaw: number; pitch: number; roll: number },
+): Verdict {
   const cfg = acceptance.active;
   const durMs = imp.t.length ? imp.t[imp.t.length - 1] - imp.t[0] : 0;
   const amp = integrateAmplitude(imp.t, imp.head);
+
+  // Pipeline de detectores: la fuente de verdad del veredicto.
+  const pipeline = evaluateImpulsePipeline({
+    impulse: imp,
+    channel: imp.side,
+    preset: cfg,
+    preImpulsePose,
+  });
+
+  // Construir `checks` legacy (peak/amp/dur) desde los resultados del
+  // pipeline para preservar la UI actual del revisor (HeadLiveView etc.).
   const horiz = isHorizontalSide(imp.side);
-  // Rangos según plano: amplitud máxima por yawTol (H) o pitchTol (V);
-  // pico/duración por la variante *H o *V del preset. La ganancia se
-  // recibe y se devuelve como métrica clínica, pero no se chequea.
   const ampMax = horiz ? cfg.yawTol : cfg.pitchTol;
+  const ampMin = horiz ? cfg.ampMinH : cfg.ampMinV;
   const peakMin = horiz ? cfg.peakMinH : cfg.peakMinV;
   const peakMax = horiz ? cfg.peakMaxH : cfg.peakMaxV;
   const durMin  = horiz ? cfg.durMinMsH : cfg.durMinMsV;
   const durMax  = horiz ? cfg.durMaxMsH : cfg.durMaxMsV;
+  const peakRes = pipeline.results.find((r) => r.id === 'peak-velocity');
+  const ampRes  = pipeline.results.find((r) => r.id === 'amplitude');
+  const durRes  = pipeline.results.find((r) => r.id === 'duration');
   const checks: Check[] = [
-    { id: 'amp',  label: 'despl.',   value: amp,      min: 0,        max: ampMax, unit: '°',
-      ok: amp <= ampMax },
+    { id: 'amp',  label: 'despl.',   value: amp,      min: ampMin,   max: ampMax, unit: '°',
+      ok: ampRes ? ampRes.severity !== 'fail' : (amp >= ampMin && amp <= ampMax) },
     { id: 'peak', label: 'pico',     value: peakHead, min: peakMin,  max: peakMax, unit: '°/s',
-      ok: peakHead >= peakMin && peakHead <= peakMax },
+      ok: peakRes ? peakRes.severity !== 'fail' : (peakHead >= peakMin && peakHead <= peakMax) },
     { id: 'dur',  label: 'duración', value: durMs,    min: durMin,   max: durMax,  unit: 'ms',
-      ok: durMs >= durMin && durMs <= durMax },
+      ok: durRes ? durRes.severity !== 'fail' : (durMs >= durMin && durMs <= durMax) },
   ];
-  const fmt = (c: Check) => {
-    const dec = c.id === 'amp' ? 1 : 0;
-    return `${c.label} ${c.value.toFixed(dec)} fuera de ${c.min}–${c.max}${c.unit ? ' ' + c.unit : ''}`;
+
+  // Razones = mensajes de todos los detectores que fallaron.
+  const reasons = pipeline.failed.map((r) => r.message);
+
+  return {
+    ok: pipeline.accepted,
+    reasons,
+    peak: peakHead,
+    gain,
+    amp,
+    durMs,
+    levelName: cfg.name,
+    checks,
+    invalidPose: pipeline.invalidPose,
+    detectorResults: pipeline.results,
   };
-  const reasons = checks.filter((c) => !c.ok).map(fmt);
-  return { ok: reasons.length === 0, reasons, peak: peakHead, gain, amp, durMs, levelName: cfg.name, checks };
 }
 const WINDOW_S = 5;
 const N = FS * WINDOW_S;
+// Buffer circular para promediar pose pre-impulso (~300 ms a FS=200 → 60 muestras).
+const POSE_BUF_MS = 300;
+const POSE_BUF_LEN = Math.ceil((POSE_BUF_MS / 1000) * FS);
 const IMP_DURATION_MS = 350;
 const IMP_PEAK_OFFSET = 110;
 const IMP_SIGMA = 35;
@@ -231,7 +268,41 @@ class Simulator {
     poseYaw0: number;
     posePitch0: number;
     poseRoll0: number;
+    /** Pose promedio sostenida ~300 ms antes del trigger. Si está
+     *  presente se pasa al pipeline de detectores para validar pose inicial. */
+    preImpulsePose?: { yaw: number; pitch: number; roll: number };
   } = null;
+
+  // Buffer circular de pose para promediar la ventana pre-impulso (~300 ms).
+  private poseBufYaw   = new Float64Array(POSE_BUF_LEN);
+  private poseBufPitch = new Float64Array(POSE_BUF_LEN);
+  private poseBufRoll  = new Float64Array(POSE_BUF_LEN);
+  private poseBufIdx = 0;
+  private poseBufFilled = 0;
+
+  /** Inserta la pose actual en el buffer circular pre-impulso. */
+  private pushPoseSample() {
+    const i = this.poseBufIdx;
+    this.poseBufYaw[i]   = this.headYaw;
+    this.poseBufPitch[i] = this.headPitch;
+    this.poseBufRoll[i]  = this.headRoll;
+    this.poseBufIdx = (i + 1) % POSE_BUF_LEN;
+    if (this.poseBufFilled < POSE_BUF_LEN) this.poseBufFilled++;
+  }
+
+  /** Devuelve la pose promedio del buffer (las últimas ~300 ms). null si
+   *  el buffer no está suficientemente lleno (< 50% de la ventana). */
+  private currentPreImpulsePose(): { yaw: number; pitch: number; roll: number } | undefined {
+    const n = this.poseBufFilled;
+    if (n < POSE_BUF_LEN / 2) return undefined;
+    let sy = 0, sp = 0, sr = 0;
+    for (let k = 0; k < n; k++) {
+      sy += this.poseBufYaw[k];
+      sp += this.poseBufPitch[k];
+      sr += this.poseBufRoll[k];
+    }
+    return { yaw: sy / n, pitch: sp / n, roll: sr / n };
+  }
 
   connect() {
     if (this.connected) return;
@@ -369,6 +440,7 @@ class Simulator {
       poseYaw0: this.headYaw,
       posePitch0: this.headPitch,
       poseRoll0: this.headRoll,
+      preImpulsePose: this.currentPreImpulsePose(),
     };
 
     // disparar parpadeo si artefacto = blink
@@ -500,6 +572,9 @@ class Simulator {
     this.headRoll += (Math.random() - 0.5) * 0.18;
     this.headRoll *= 0.94;
 
+    // Alimentar buffer de pose pre-impulso sólo cuando NO hay impulso activo.
+    if (!this.impCfg) this.pushPoseSample();
+
     this.rev++;
   }
 
@@ -584,6 +659,7 @@ class Simulator {
             poseYaw0: this.headYaw,
             posePitch0: this.headPitch,
             poseRoll0: this.headRoll,
+            preImpulsePose: this.currentPreImpulsePose(),
           };
           if (artifact === 'blink') {
             setTimeout(() => this.runBlink(), 80 + Math.random() * 80);
@@ -678,6 +754,10 @@ class Simulator {
       this.gazeY = pitchToGaze(this.headPitch);
     }
 
+    // Alimentar buffer de pose pre-impulso sólo cuando no hay impulso activo.
+    // Una entrada por tick basta (cadencia uniforme): el promedio es robusto.
+    if (!this.impCfg) this.pushPoseSample();
+
     // Rotar buffers de plot una entrada por cada sample real recibido.
     // Si no hubo samples este tick, no rotar (evita plateaus en TraceChart).
     if (N_S > 0) {
@@ -723,9 +803,10 @@ class Simulator {
       case 'RA': this.impulsesRA = [...this.impulsesRA, imp].slice(-15); break;
       case 'RP': this.impulsesRP = [...this.impulsesRP, imp].slice(-15); break;
     }
+    const preImpulsePose = c.preImpulsePose;
     this.capturing = null;
     this.lastImpulse = imp;
-    this.lastVerdict = evaluateImpulse(imp, peakHead, gain);
+    this.lastVerdict = evaluateImpulse(imp, peakHead, gain, preImpulsePose);
   }
 
   private scheduleBlink() {
