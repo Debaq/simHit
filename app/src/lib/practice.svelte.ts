@@ -4,7 +4,7 @@
 // totales o aciertos por preset).
 
 import { acceptance } from '$lib/acceptance.svelte';
-import { sim, type Verdict, type Impulse } from '$lib/simulator.svelte';
+import { sim, isHorizontalSide, type Verdict, type Impulse, type ImpulseSide } from '$lib/simulator.svelte';
 import type { Escenario } from '$lib/bundle.svelte';
 
 export interface SeqItem {
@@ -16,7 +16,7 @@ export interface SeqItem {
 export interface Attempt {
   itemIdx: number;
   acceptanceId: string;
-  side: 'LL' | 'RL';
+  side: ImpulseSide;
   ok: boolean;
   peak: number;
   gain: number;
@@ -233,13 +233,13 @@ class PracticeStore {
     }
   }
 
-  consumeImpulse(verdict: Verdict, side: 'LL' | 'RL', impulseId: number, impulse?: Impulse | null) {
+  consumeImpulse(verdict: Verdict, side: ImpulseSide, impulseId: number, impulse?: Impulse | null) {
     if (!this.active || this.paused || this.done) return;
     if (impulseId <= this.lastSeenImpulseId) return;
     const cur = this.current;
     if (!cur) return;
 
-    const isHoriz = side === 'LL' || side === 'RL';
+    const isHoriz = isHorizontalSide(side);
     if (this.variant === 'vert' && isHoriz) return;
     if (this.variant === 'horiz' && !isHoriz) return;
 

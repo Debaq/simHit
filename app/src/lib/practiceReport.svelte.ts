@@ -11,13 +11,14 @@
 
 import { storage } from './storage';
 import type { Achievements } from './practice.svelte';
+import type { ImpulseSide } from './simulator.svelte';
 
 const PRACTICE_DIR = 'informes/practica';
 
 export interface PracticeAttemptSummary {
   itemIdx: number;
   acceptanceId: string;
-  side: 'LL' | 'RL';
+  side: ImpulseSide;
   ok: boolean;
   peak: number;
   gain: number;

@@ -31,10 +31,11 @@
     { id: 'RL', label: 'Lateral derecho' },
   ];
   function editorImpulsesBy(s: Side): ImpulseSnapshot[] {
+    // El editor del simulador clínico opera sólo sobre canales horizontales.
     const arr = s === 'LL' ? sim.impulsesLL : sim.impulsesRL;
     return arr.map((i) => ({
       id: i.id,
-      side: i.side,
+      side: i.side as 'LL' | 'RL',
       t: Array.from(i.t),
       head: Array.from(i.head),
       eye: Array.from(i.eye),

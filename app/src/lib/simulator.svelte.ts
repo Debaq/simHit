@@ -5,14 +5,55 @@ import { serial } from '$lib/serial.svelte';
 import { acceptance } from '$lib/acceptance.svelte';
 import { settings } from '$lib/settings.svelte';
 
+/** Canal del impulso. Hasta F1 sólo se generaban LL/RL; ahora también
+ *  pueden producirse impulsos verticales (LA/LP/RA/RP) cuando la cabeza
+ *  arranca girada ±~45° y la velocidad combinada yaw+pitch supera el
+ *  umbral. La firma se mantiene compatible con LL/RL. */
+export type ImpulseSide = 'LL' | 'RL' | 'LA' | 'LP' | 'RA' | 'RP';
+
 export type Impulse = {
   id: number;
-  side: 'LL' | 'RL';
+  side: ImpulseSide;
   t: Float64Array;
+  /** Señal de cabeza usada por la evaluación: para LL/RL es gyroYaw, para
+   *  verticales es la proyección de (gyroYaw, gyroPitch) sobre el eje del
+   *  canal. Permite que evaluateImpulse trabaje en 1D igual que antes. */
   head: Float64Array;
   eye: Float64Array;
   gain: number;
+  /** Velocidad cruda yaw °/s muestra a muestra (para revisor diagonal). */
+  headYawRaw?: Float64Array;
+  /** Velocidad cruda pitch °/s muestra a muestra. */
+  headPitchRaw?: Float64Array;
 };
+
+/** Vector unitario del plano de cada canal en el frame (yaw, pitch).
+ *
+ *  Convención de signos:
+ *    yaw < 0  = cabeza/gyro hacia la izquierda
+ *    yaw > 0  = cabeza/gyro hacia la derecha
+ *    pitch    = se asume pitch > 0 = mirada hacia arriba.
+ *  TODO[#13]: confirmar el signo de pitch contra el firmware una vez se
+ *  pruebe con hardware. Si el firmware entrega pitch invertido, basta con
+ *  multiplicar la componente pitch de todos los axes por -1.
+ *
+ *  Planos verticales: la cabeza arranca girada ~45° (LARP a la izq.,
+ *  RALP a la der.) y el impulso es diagonal: combina yaw y pitch. */
+export type ChannelAxis = { yaw: number; pitch: number };
+export const CHANNEL_AXES: Record<ImpulseSide, ChannelAxis> = {
+  LL: { yaw: -1, pitch: 0 },
+  RL: { yaw: +1, pitch: 0 },
+  LA: { yaw: -Math.SQRT1_2, pitch: -Math.SQRT1_2 }, // izq + abajo
+  LP: { yaw: -Math.SQRT1_2, pitch: +Math.SQRT1_2 }, // izq + arriba
+  RA: { yaw: +Math.SQRT1_2, pitch: +Math.SQRT1_2 }, // der + arriba
+  RP: { yaw: +Math.SQRT1_2, pitch: -Math.SQRT1_2 }, // der + abajo
+};
+
+/** Umbral de pose (°) que define en qué plano está el sujeto.
+ *  |yawPose| < umbral → plano horizontal (LL/RL).
+ *  yawPose < -umbral  → LARP (LA o RP, según signo del impulso).
+ *  yawPose > +umbral  → RALP (RA o LP, según signo del impulso). */
+const POSE_PLANE_THR = 25;
 
 export type ImpulseTrigger = {
   side: 'L' | 'R' | 'random';
@@ -67,22 +108,34 @@ export interface Verdict {
   checks: Check[];
 }
 
+/** True si el canal pertenece al plano horizontal (LL/RL). */
+export function isHorizontalSide(s: ImpulseSide): boolean {
+  return s === 'LL' || s === 'RL';
+}
+
 function evaluateImpulse(imp: Impulse, peakHead: number, gain: number): Verdict {
   const cfg = acceptance.active;
   const durMs = imp.t.length ? imp.t[imp.t.length - 1] - imp.t[0] : 0;
   const amp = integrateAmplitude(imp.t, imp.head);
-  // La amplitud máxima permitida del impulso es la zona verde (yawTol para
-  // canales horizontales LL/RL; pitchTol para verticales).
-  const ampMax = (imp.side === 'LL' || imp.side === 'RL') ? cfg.yawTol : cfg.pitchTol;
+  const horiz = isHorizontalSide(imp.side);
+  // Rangos según plano: amplitud máxima por yawTol (H) o pitchTol (V);
+  // pico/ganancia/duración por la variante *H o *V del preset.
+  const ampMax = horiz ? cfg.yawTol : cfg.pitchTol;
+  const peakMin = horiz ? cfg.peakMinH : cfg.peakMinV;
+  const peakMax = horiz ? cfg.peakMaxH : cfg.peakMaxV;
+  const gainMin = horiz ? cfg.gainMinH : cfg.gainMinV;
+  const gainMax = horiz ? cfg.gainMaxH : cfg.gainMaxV;
+  const durMin  = horiz ? cfg.durMinMsH : cfg.durMinMsV;
+  const durMax  = horiz ? cfg.durMaxMsH : cfg.durMaxMsV;
   const checks: Check[] = [
-    { id: 'amp',  label: 'despl.',   value: amp,      min: 0,             max: ampMax,        unit: '°',
+    { id: 'amp',  label: 'despl.',   value: amp,      min: 0,        max: ampMax, unit: '°',
       ok: amp <= ampMax },
-    { id: 'peak', label: 'pico',     value: peakHead, min: cfg.peakMin,   max: cfg.peakMax,   unit: '°/s',
-      ok: peakHead >= cfg.peakMin && peakHead <= cfg.peakMax },
-    { id: 'gain', label: 'ganancia', value: gain,     min: cfg.gainMin,   max: cfg.gainMax,   unit: '',
-      ok: gain >= cfg.gainMin && gain <= cfg.gainMax },
-    { id: 'dur',  label: 'duración', value: durMs,    min: cfg.durMinMs,  max: cfg.durMaxMs,  unit: 'ms',
-      ok: durMs >= cfg.durMinMs && durMs <= cfg.durMaxMs },
+    { id: 'peak', label: 'pico',     value: peakHead, min: peakMin,  max: peakMax, unit: '°/s',
+      ok: peakHead >= peakMin && peakHead <= peakMax },
+    { id: 'gain', label: 'ganancia', value: gain,     min: gainMin,  max: gainMax, unit: '',
+      ok: gain >= gainMin && gain <= gainMax },
+    { id: 'dur',  label: 'duración', value: durMs,    min: durMin,   max: durMax,  unit: 'ms',
+      ok: durMs >= durMin && durMs <= durMax },
   ];
   const fmt = (c: Check) => {
     const dec = c.id === 'gain' ? 2 : c.id === 'amp' ? 1 : 0;
@@ -119,6 +172,11 @@ class Simulator {
   blinkEnabled = $state(true);
   impulsesLL = $state<Impulse[]>([]);
   impulsesRL = $state<Impulse[]>([]);
+  // Verticales (F1+F2). Quedan vacíos mientras la pose esté neutra.
+  impulsesLA = $state<Impulse[]>([]);
+  impulsesLP = $state<Impulse[]>([]);
+  impulsesRA = $state<Impulse[]>([]);
+  impulsesRP = $state<Impulse[]>([]);
   excludedIds = $state<Set<number>>(new Set());
   rev = $state(0);
 
@@ -159,10 +217,14 @@ class Simulator {
   } | null = null;
 
   private capturing: null | {
-    side: 'LL' | 'RL';
+    side: ImpulseSide;
     t: number[];
+    /** Señal proyectada sobre el eje del canal (1D, alimenta evaluateImpulse). */
     head: number[];
     eye: number[];
+    /** Velocidades crudas yaw/pitch para revisar trayectorias diagonales. */
+    headYawRaw: number[];
+    headPitchRaw: number[];
     poseYaw0: number;
     posePitch0: number;
     poseRoll0: number;
@@ -250,6 +312,10 @@ class Simulator {
   clearImpulses() {
     this.impulsesLL = [];
     this.impulsesRL = [];
+    this.impulsesLA = [];
+    this.impulsesLP = [];
+    this.impulsesRA = [];
+    this.impulsesRP = [];
     this.excludedIds = new Set();
   }
 
@@ -262,6 +328,10 @@ class Simulator {
   deleteImpulse(id: number) {
     this.impulsesLL = this.impulsesLL.filter((i) => i.id !== id);
     this.impulsesRL = this.impulsesRL.filter((i) => i.id !== id);
+    this.impulsesLA = this.impulsesLA.filter((i) => i.id !== id);
+    this.impulsesLP = this.impulsesLP.filter((i) => i.id !== id);
+    this.impulsesRA = this.impulsesRA.filter((i) => i.id !== id);
+    this.impulsesRP = this.impulsesRP.filter((i) => i.id !== id);
     if (this.excludedIds.has(id)) {
       const next = new Set(this.excludedIds);
       next.delete(id);
@@ -291,6 +361,8 @@ class Simulator {
       t: [],
       head: [],
       eye: [],
+      headYawRaw: [],
+      headPitchRaw: [],
       poseYaw0: this.headYaw,
       posePitch0: this.headPitch,
       poseRoll0: this.headRoll,
@@ -392,6 +464,10 @@ class Simulator {
         this.capturing.t.push(dt);
         this.capturing.head.push(headSig);
         this.capturing.eye.push(eyeSig);
+        // En el mock sin sensor la señal proyectada coincide con yaw;
+        // pitch se mantiene en 0 para no contaminar el revisor diagonal.
+        this.capturing.headYawRaw.push(headSig);
+        this.capturing.headPitchRaw.push(0);
       }
     } else {
       this.gaze = 0;
@@ -433,9 +509,20 @@ class Simulator {
     this.headPitch = serial.posePitch;
     this.headRoll = serial.poseRoll;
 
-    // Drenar todas las muestras gyro acumuladas desde el último tick. Evita
-    // pérdidas/duplicados por bursts USB y jitter del setInterval.
-    const samples = serial.drainGyroYaw();
+    // Drenar muestras gyro yaw + pitch en paralelo. drainGyro vacía la cola
+    // una sola vez y devuelve ambos arrays alineados muestra a muestra.
+    // Evita pérdidas/duplicados por bursts USB y jitter del setInterval.
+    const drained = serial.drainGyro();
+    let yawSamples = drained.yaw;
+    let pitchSamples = drained.pitch;
+    // Defensivo: si por algún motivo los largos difieren (no debería ocurrir
+    // porque ambos vienen de la misma cola), truncar al mínimo y dejar TODO.
+    // TODO[#13]: revisar si el firmware puede llegar a desalinear yaw/pitch.
+    if (yawSamples.length !== pitchSamples.length) {
+      const n = Math.min(yawSamples.length, pitchSamples.length);
+      yawSamples = yawSamples.slice(0, n);
+      pitchSamples = pitchSamples.slice(0, n);
+    }
 
     // Suavizado con dt fijo (1/FS) por muestra. τ=50ms.
     const SMOOTH_TAU_MS = 50;
@@ -444,21 +531,36 @@ class Simulator {
 
     let eye = (Math.random() - 0.5) * 3;
     let lastEyeSig = 0;
-    const N_S = samples.length;
+    const N_S = yawSamples.length;
     const smoothHistory = new Array<number>(N_S);
     const eyeHistory = new Array<number>(N_S);
+    // Suavizado de pitch independiente (misma τ). Local al tick: no se
+    // persiste como campo porque sólo se necesita durante la captura.
+    let smoothedPitch = 0;
 
     for (let i = 0; i < N_S; i++) {
-      const head = samples[i];
+      const yawRaw = yawSamples[i];
+      const pitchRaw = pitchSamples[i];
       // Timestamp aproximado de esta muestra (asume cadencia uniforme 1/FS)
       const sampleNow = now - (N_S - 1 - i) * SAMPLE_DT_MS;
-      this.smoothedHead += (head - this.smoothedHead) * SMOOTH_ALPHA;
+      this.smoothedHead += (yawRaw - this.smoothedHead) * SMOOTH_ALPHA;
+      smoothedPitch += (pitchRaw - smoothedPitch) * SMOOTH_ALPHA;
       smoothHistory[i] = this.smoothedHead;
 
-      // Inicio de impulso (solo en escenario)
-      if (this.mode === 'scenario' && !this.impCfg && Math.abs(head) > IMPULSE_START_THR) {
-        const dir = head > 0 ? 1 : -1;
-        const channel: Channel = dir < 0 ? 'LL' : 'RL';
+      // Magnitud combinada para detectar inicio. Permite disparar también
+      // con impulsos diagonales cuando la cabeza arranca girada ±~45°.
+      const magCombined = Math.sqrt(yawRaw * yawRaw + pitchRaw * pitchRaw);
+
+      // Inicio de impulso (sólo en escenario)
+      if (this.mode === 'scenario' && !this.impCfg && magCombined > IMPULSE_START_THR) {
+        const side = pickChannelFromImpulse(this.headYaw, yawRaw, pitchRaw);
+        const axis = CHANNEL_AXES[side];
+        const projected = yawRaw * axis.yaw + pitchRaw * axis.pitch;
+        // Para LL/RL `dir` conserva el signo histórico (positivo = der).
+        // Para verticales fijamos dir=+1: la señal proyectada ya es positiva
+        // por construcción del eje (axis · (yaw,pitch) ≈ +mag durante el hit).
+        const dir: number = side === 'LL' ? -1 : side === 'RL' ? 1 : 1;
+        const channel: Channel = side;
         // Lectura reactiva del escenario activo en cada inicio de impulso.
         const sc = scenarios.active;
         if (sc) this.currentScenarioName = sc.name;
@@ -468,13 +570,14 @@ class Simulator {
           this.impCfg = {
             startMs: sampleNow,
             dir,
-            peak: Math.abs(head),
+            peak: Math.abs(projected),
             gain: cfg.gain,
             saccade: cfg.saccade,
             artifact,
           };
           this.capturing = {
-            side: channel, t: [], head: [], eye: [],
+            side, t: [], head: [], eye: [],
+            headYawRaw: [], headPitchRaw: [],
             poseYaw0: this.headYaw,
             posePitch0: this.headPitch,
             poseRoll0: this.headRoll,
@@ -490,10 +593,17 @@ class Simulator {
 
       if (this.impCfg && this.capturing) {
         const cfg = this.impCfg;
-        cfg.peak = Math.max(cfg.peak, Math.abs(head));
+        const axis = CHANNEL_AXES[this.capturing.side];
+        // Proyección de la velocidad combinada sobre el eje del canal.
+        // Para LL/RL coincide con ±yaw (axis.pitch = 0); para verticales
+        // combina yaw y pitch en una señal 1D que conserva el signo.
+        const projected = yawRaw * axis.yaw + pitchRaw * axis.pitch;
+        const smoothedProj =
+          this.smoothedHead * axis.yaw + smoothedPitch * axis.pitch;
+        cfg.peak = Math.max(cfg.peak, Math.abs(projected));
         const elapsed = sampleNow - cfg.startMs;
 
-        let eyeSig = -cfg.dir * Math.abs(this.smoothedHead) * cfg.gain;
+        let eyeSig = -cfg.dir * Math.abs(smoothedProj) * cfg.gain;
         if (cfg.artifact === 'wrong_dir') eyeSig = -eyeSig;
         if (cfg.artifact === 'overshoot') eyeSig *= 1.4;
         if (cfg.artifact === 'fixation_loss') eyeSig += (Math.random() - 0.5) * 60;
@@ -512,16 +622,24 @@ class Simulator {
         }
 
         this.capturing.t.push(elapsed - IMP_PEAK_OFFSET);
-        this.capturing.head.push(this.smoothedHead);
+        this.capturing.head.push(smoothedProj);
         this.capturing.eye.push(eyeSig);
+        this.capturing.headYawRaw.push(yawRaw);
+        this.capturing.headPitchRaw.push(pitchRaw);
         lastEyeSig = eyeSig;
       }
       eyeHistory[i] = lastEyeSig;
     }
 
-    // Para fin-de-impulso usar último valor disponible (puede ser stale si
-    // este tick no recibió samples nuevos: en ese caso solo cuenta tiempo).
-    const head = N_S > 0 ? samples[N_S - 1] : serial.gyroYaw;
+    // Para fin-de-impulso usar la señal proyectada del último valor
+    // disponible (puede ser stale si este tick no recibió samples nuevos:
+    // en ese caso sólo cuenta tiempo). Para LL/RL coincide con ±gyroYaw.
+    const lastYaw = N_S > 0 ? yawSamples[N_S - 1] : serial.gyroYaw;
+    const lastPitch = N_S > 0 ? pitchSamples[N_S - 1] : serial.gyroPitch;
+    const head = this.impCfg && this.capturing
+      ? lastYaw * CHANNEL_AXES[this.capturing.side].yaw +
+        lastPitch * CHANNEL_AXES[this.capturing.side].pitch
+      : lastYaw;
 
     if (this.impCfg) {
       const cfg = this.impCfg;
@@ -591,9 +709,17 @@ class Simulator {
       head: Float64Array.from(c.head),
       eye: Float64Array.from(c.eye),
       gain,
+      headYawRaw: Float64Array.from(c.headYawRaw),
+      headPitchRaw: Float64Array.from(c.headPitchRaw),
     };
-    if (c.side === 'LL') this.impulsesLL = [...this.impulsesLL, imp].slice(-15);
-    else this.impulsesRL = [...this.impulsesRL, imp].slice(-15);
+    switch (c.side) {
+      case 'LL': this.impulsesLL = [...this.impulsesLL, imp].slice(-15); break;
+      case 'RL': this.impulsesRL = [...this.impulsesRL, imp].slice(-15); break;
+      case 'LA': this.impulsesLA = [...this.impulsesLA, imp].slice(-15); break;
+      case 'LP': this.impulsesLP = [...this.impulsesLP, imp].slice(-15); break;
+      case 'RA': this.impulsesRA = [...this.impulsesRA, imp].slice(-15); break;
+      case 'RP': this.impulsesRP = [...this.impulsesRP, imp].slice(-15); break;
+    }
     this.capturing = null;
     this.lastImpulse = imp;
     this.lastVerdict = evaluateImpulse(imp, peakHead, gain);
@@ -638,6 +764,34 @@ class Simulator {
 }
 
 export const sim = new Simulator();
+
+/** Decide a qué canal pertenece un impulso recién disparado.
+ *
+ *  Pasos:
+ *   1) La pose de cabeza (yawPose) ubica el plano anatómico:
+ *      - |yawPose| < POSE_PLANE_THR  → horizontal (LL/RL).
+ *      - yawPose < -POSE_PLANE_THR   → LARP (LA / RP).
+ *      - yawPose > +POSE_PLANE_THR   → RALP (RA / LP).
+ *   2) Dentro del plano, el signo de la proyección sobre el eje del canal
+ *      desempata anterior vs posterior (o izq vs der en horizontal).
+ *      Se elige el canal del plano cuya proyección sea positiva durante
+ *      el impulso (axis · (yaw, pitch) > 0). */
+function pickChannelFromImpulse(yawPose: number, gyroYaw: number, gyroPitch: number): ImpulseSide {
+  // Horizontal: pose cercana a neutro.
+  if (Math.abs(yawPose) < POSE_PLANE_THR) {
+    return gyroYaw > 0 ? 'RL' : 'LL';
+  }
+  // LARP: cabeza girada a la izquierda → canales LA y RP.
+  if (yawPose < 0) {
+    const projLA = gyroYaw * CHANNEL_AXES.LA.yaw + gyroPitch * CHANNEL_AXES.LA.pitch;
+    const projRP = gyroYaw * CHANNEL_AXES.RP.yaw + gyroPitch * CHANNEL_AXES.RP.pitch;
+    return projLA >= projRP ? 'LA' : 'RP';
+  }
+  // RALP: cabeza girada a la derecha → canales RA y LP.
+  const projRA = gyroYaw * CHANNEL_AXES.RA.yaw + gyroPitch * CHANNEL_AXES.RA.pitch;
+  const projLP = gyroYaw * CHANNEL_AXES.LP.yaw + gyroPitch * CHANNEL_AXES.LP.pitch;
+  return projRA >= projLP ? 'RA' : 'LP';
+}
 
 /** Resuelve la lista efectiva de artefactos para un canal:
  *  si el canal define artefactos, ésos; si no, los defaults del EyeSet activo. */

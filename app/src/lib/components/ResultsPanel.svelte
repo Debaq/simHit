@@ -65,10 +65,12 @@
 
   function snapshotImpulses(): ImpulseSnapshot[] {
     // Solo incluidos: los excluidos en captura no se llevan al informe.
+    // El informe clínico aún sólo modela LL/RL; los canales verticales
+    // (LA/LP/RA/RP) no entran acá hasta que el flujo /informes los soporte.
     const all = [...includedLL, ...includedRL];
     return all.map((i) => ({
       id: i.id,
-      side: i.side,
+      side: i.side as 'LL' | 'RL',
       t: Array.from(i.t),
       head: Array.from(i.head),
       eye: Array.from(i.eye),

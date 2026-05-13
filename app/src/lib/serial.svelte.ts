@@ -205,9 +205,34 @@ class SerialStore {
     if (this.gyroQueue.length > 256) this.gyroQueue.splice(0, this.gyroQueue.length - 256);
   }
 
+  // Drena cola de gyro (yaw + pitch en paralelo) desde último tick.
+  // Devuelve dos arrays alineados muestra a muestra. Si nadie llama a
+  // drainGyroYaw/Pitch entre ticks, el simulator consume ambos canales en
+  // un mismo drenaje para garantizar el alineamiento.
+  drainGyro(): { yaw: number[]; pitch: number[] } {
+    const my = this.axes.gyro.yaw;
+    const mp = this.axes.gyro.pitch;
+    const yaw = this.gyroQueue.map((s) => s[my.axis] * my.sign);
+    const pitch = this.gyroQueue.map((s) => s[mp.axis] * mp.sign);
+    this.gyroQueue.length = 0;
+    return { yaw, pitch };
+  }
+
   // Drena cola de gyro (mapeada a yaw del eje configurado) desde último tick.
+  // Conservado para compatibilidad con llamadores que no consumen pitch.
+  // Vacía la cola, igual que drainGyro.
   drainGyroYaw(): number[] {
     const m = this.axes.gyro.yaw;
+    const out = this.gyroQueue.map((s) => s[m.axis] * m.sign);
+    this.gyroQueue.length = 0;
+    return out;
+  }
+
+  // Drena cola de gyro mapeada a pitch. Análogo a drainGyroYaw.
+  // No usar junto con drainGyroYaw en el mismo tick: cada drain vacía la
+  // cola. Para consumo combinado usar drainGyro().
+  drainGyroPitch(): number[] {
+    const m = this.axes.gyro.pitch;
     const out = this.gyroQueue.map((s) => s[m.axis] * m.sign);
     this.gyroQueue.length = 0;
     return out;
