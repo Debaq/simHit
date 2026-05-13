@@ -16,7 +16,9 @@
   onMount(() => { scenarios.load(); });
 
   let activeScenario = $derived(scenarios.active);
-  let editable = $derived(!!activeScenario && !scenarios.isExampleActive);
+  let isExampleModified = $derived(
+    !!activeScenario && scenarios.isExampleActive && scenarios.isExampleModified(activeScenario.id),
+  );
 
   async function newScenario() {
     const name = await ui.prompt('Nombre del caso', 'Nuevo caso');
@@ -32,25 +34,38 @@
     scenarios.duplicate(activeScenario.id);
   }
 
+  async function renameActive() {
+    if (!activeScenario) return;
+    const name = await ui.prompt('Nuevo nombre', activeScenario.name);
+    if (!name) return;
+    scenarios.rename(activeScenario.id, name);
+  }
+
+  async function resetActive() {
+    if (!activeScenario || !scenarios.isExampleActive) return;
+    if (!(await ui.confirm('Restaurar predeterminado', `Se descartarán los cambios hechos a "${activeScenario.name}" y se volverá a los valores originales.`, { danger: true }))) return;
+    await scenarios.resetExample(activeScenario.id);
+  }
+
   function updateChannel(channel: Channel, patch: Partial<ChannelConfig>) {
-    if (!activeScenario || !editable) return;
+    if (!activeScenario) return;
     scenarios.updateChannel(activeScenario.id, channel, patch);
   }
 
   function addArtifact(channel: Channel) {
-    if (!activeScenario || !editable) return;
+    if (!activeScenario) return;
     const cur = activeScenario.channels[channel].artifacts;
     const next: ArtifactConfig[] = [...cur, { artifact: 'blink', probability: 0.3 }];
     scenarios.setChannelArtifacts(activeScenario.id, channel, next);
   }
   function updateArtifact(channel: Channel, idx: number, patch: Partial<ArtifactConfig>) {
-    if (!activeScenario || !editable) return;
+    if (!activeScenario) return;
     const cur = activeScenario.channels[channel].artifacts;
     const next = cur.map((a, i) => (i === idx ? { ...a, ...patch } : a));
     scenarios.setChannelArtifacts(activeScenario.id, channel, next);
   }
   function removeArtifact(channel: Channel, idx: number) {
-    if (!activeScenario || !editable) return;
+    if (!activeScenario) return;
     const cur = activeScenario.channels[channel].artifacts;
     scenarios.setChannelArtifacts(activeScenario.id, channel, cur.filter((_, i) => i !== idx));
   }
@@ -108,12 +123,16 @@
               <p class="desc">{activeScenario.description}</p>
             {/if}
           </div>
-          {#if scenarios.isExampleActive}
-            <div class="readonly">
-              <span>📚 Caso predefinido — solo lectura</span>
-              <button class="primary" onclick={duplicateActive}>⎘ Duplicar para editar</button>
-            </div>
-          {/if}
+          <div class="hd-actions">
+            {#if scenarios.isExampleActive}
+              <span class="tag">📚 Caso predefinido{#if isExampleModified} · ✎ modificado{/if}</span>
+            {/if}
+            <button onclick={renameActive}>Renombrar</button>
+            <button onclick={duplicateActive}>⎘ Duplicar</button>
+            {#if scenarios.isExampleActive}
+              <button class="reset" disabled={!isExampleModified} onclick={resetActive} title={isExampleModified ? 'Restaurar valores originales' : 'Sin cambios respecto al predeterminado'}>↺ Restaurar predeterminado</button>
+            {/if}
+          </div>
         </header>
 
         <section class="grid">
@@ -133,7 +152,7 @@
                     <input
                       type="range" min="0" max="1.5" step="0.05"
                       value={cfg.gain}
-                      disabled={!editable}
+                     
                       oninput={(e) => updateChannel(ch, { gain: +(e.currentTarget as HTMLInputElement).value })}
                     />
                   </label>
@@ -143,7 +162,7 @@
                     <input
                       type="range" min="80" max="300" step="5"
                       value={cfg.peakVel}
-                      disabled={!editable}
+                     
                       oninput={(e) => updateChannel(ch, { peakVel: +(e.currentTarget as HTMLInputElement).value })}
                     />
                   </label>
@@ -152,7 +171,7 @@
                     <span class="lbl">Sacada correctiva</span>
                     <select
                       value={cfg.saccade}
-                      disabled={!editable}
+                     
                       onchange={(e) => updateChannel(ch, { saccade: (e.currentTarget as HTMLSelectElement).value as ChannelConfig['saccade'] })}
                     >
                       <option value="none">Ninguna</option>
@@ -164,7 +183,7 @@
                   <div class="art">
                     <div class="art-hd">
                       <span class="lbl">Artefactos</span>
-                      <button disabled={!editable} onclick={() => addArtifact(ch)}>+ Añadir</button>
+                      <button onclick={() => addArtifact(ch)}>+ Añadir</button>
                     </div>
                     {#if cfg.artifacts.length === 0}
                       <p class="muted">Sin artefactos (hereda del set de ojos activo).</p>
@@ -173,7 +192,7 @@
                       <div class="art-row">
                         <select
                           value={a.artifact}
-                          disabled={!editable}
+                         
                           onchange={(e) => updateArtifact(ch, i, { artifact: (e.currentTarget as HTMLSelectElement).value as ArtifactKind })}
                         >
                           {#each ARTIFACT_OPTIONS as opt}
@@ -183,10 +202,10 @@
                         <input
                           type="number" min="0" max="1" step="0.05"
                           value={a.probability}
-                          disabled={!editable}
+                         
                           oninput={(e) => updateArtifact(ch, i, { probability: +(e.currentTarget as HTMLInputElement).value })}
                         />
-                        <button class="del" disabled={!editable} onclick={() => removeArtifact(ch, i)}>×</button>
+                        <button class="del" onclick={() => removeArtifact(ch, i)}>×</button>
                       </div>
                     {/each}
                   </div>
@@ -211,7 +230,7 @@
                     <input
                       type="range" min="0" max="1.5" step="0.05"
                       value={cfg.gain}
-                      disabled={!editable}
+                     
                       oninput={(e) => updateChannel(ch, { gain: +(e.currentTarget as HTMLInputElement).value })}
                     />
                   </label>
@@ -221,7 +240,7 @@
                     <input
                       type="range" min="80" max="300" step="5"
                       value={cfg.peakVel}
-                      disabled={!editable}
+                     
                       oninput={(e) => updateChannel(ch, { peakVel: +(e.currentTarget as HTMLInputElement).value })}
                     />
                   </label>
@@ -230,7 +249,7 @@
                     <span class="lbl">Sacada correctiva</span>
                     <select
                       value={cfg.saccade}
-                      disabled={!editable}
+                     
                       onchange={(e) => updateChannel(ch, { saccade: (e.currentTarget as HTMLSelectElement).value as ChannelConfig['saccade'] })}
                     >
                       <option value="none">Ninguna</option>
@@ -242,7 +261,7 @@
                   <div class="art">
                     <div class="art-hd">
                       <span class="lbl">Artefactos</span>
-                      <button disabled={!editable} onclick={() => addArtifact(ch)}>+ Añadir</button>
+                      <button onclick={() => addArtifact(ch)}>+ Añadir</button>
                     </div>
                     {#if cfg.artifacts.length === 0}
                       <p class="muted">Sin artefactos (hereda del set de ojos activo).</p>
@@ -251,7 +270,7 @@
                       <div class="art-row">
                         <select
                           value={a.artifact}
-                          disabled={!editable}
+                         
                           onchange={(e) => updateArtifact(ch, i, { artifact: (e.currentTarget as HTMLSelectElement).value as ArtifactKind })}
                         >
                           {#each ARTIFACT_OPTIONS as opt}
@@ -261,10 +280,10 @@
                         <input
                           type="number" min="0" max="1" step="0.05"
                           value={a.probability}
-                          disabled={!editable}
+                         
                           oninput={(e) => updateArtifact(ch, i, { probability: +(e.currentTarget as HTMLInputElement).value })}
                         />
-                        <button class="del" disabled={!editable} onclick={() => removeArtifact(ch, i)}>×</button>
+                        <button class="del" onclick={() => removeArtifact(ch, i)}>×</button>
                       </div>
                     {/each}
                   </div>
@@ -327,13 +346,20 @@
   .hd { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
   .hd h2 { margin: 0; font-size: 18px; }
   .hd .desc { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); max-width: 600px; }
-  .readonly {
-    display: flex; align-items: center; gap: 10px;
+  .hd-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .hd-actions .tag {
     background: var(--surface); border: 1px solid var(--border-strong);
-    border-radius: 999px; padding: 4px 6px 4px 14px;
-    font-size: 12px; box-shadow: var(--shadow);
+    border-radius: 999px; padding: 4px 12px; font-size: 11px; color: var(--text-muted);
   }
-  .readonly button { font-size: 11px; padding: 4px 10px; border-radius: 999px; }
+  .hd-actions button {
+    font-size: 12px; padding: 6px 10px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); cursor: pointer; color: inherit;
+  }
+  .hd-actions button:hover:not(:disabled) { border-color: var(--primary); }
+  .hd-actions button.reset { border-color: var(--warning, #d97706); color: var(--warning, #d97706); }
+  .hd-actions button.reset:hover:not(:disabled) { background: var(--warning, #d97706); color: white; }
+  .hd-actions button:disabled { opacity: .4; cursor: not-allowed; }
 
   .grid { display: flex; flex-direction: column; gap: 16px; }
   .grp { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
@@ -354,7 +380,6 @@
     border-radius: var(--radius-sm); padding: 12px;
     display: flex; flex-direction: column; gap: 10px;
   }
-  .ch-card.disabled { opacity: .5; pointer-events: none; }
   .ch-hd { display: flex; align-items: baseline; gap: 8px; }
   .ch-key { font-family: ui-monospace, monospace; font-weight: 700; font-size: 14px; color: var(--primary); }
   .ch-name { font-size: 12px; color: var(--text-muted); }

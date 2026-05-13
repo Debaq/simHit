@@ -4,7 +4,7 @@
   import { ui } from '$lib/dialog.svelte';
 
   let active = $derived(acceptance.active);
-  let editable = $derived(!active.builtin);
+  let isModifiedBuiltin = $derived(active.builtin && acceptance.isBuiltinModified(active.id));
 
   function pick(id: string) { acceptance.setActive(id); }
 
@@ -21,15 +21,19 @@
   }
 
   async function renameActive() {
-    if (!editable) return;
     const name = await ui.prompt('Nuevo nombre', active.name);
     if (!name) return;
     acceptance.update(active.id, { name });
   }
 
   function patch(p: Partial<AcceptanceCfg> & { clinicallyValid?: boolean }) {
-    if (!editable) return;
     acceptance.update(active.id, p);
+  }
+
+  async function resetActive() {
+    if (!active.builtin) return;
+    if (!(await ui.confirm('Restaurar predeterminado', `Se descartarán los cambios hechos a "${active.name}" y se volverá a los valores originales.`, { danger: true }))) return;
+    acceptance.resetBuiltin(active.id);
   }
 
   /** Badge visual de validez clínica por preset. */
@@ -97,7 +101,7 @@
           <h2>{active.name}</h2>
           <p class="desc">
             {#if active.builtin}
-              📚 Nivel predefinido — solo lectura. Duplicalo para editar.
+              📚 Nivel predefinido{#if isModifiedBuiltin} · ✎ modificado{/if} — editable. Los cambios se aplican al simulador en tiempo real.
             {:else}
               Editable. Los cambios se aplican al simulador en tiempo real.
             {/if}
@@ -105,8 +109,9 @@
         </div>
         <div class="hd-actions">
           <button onclick={duplicateActive}>⎘ Duplicar</button>
-          {#if editable}
-            <button onclick={renameActive}>Renombrar</button>
+          <button onclick={renameActive}>Renombrar</button>
+          {#if active.builtin}
+            <button class="reset" disabled={!isModifiedBuiltin} onclick={resetActive} title={isModifiedBuiltin ? 'Restaurar valores originales' : 'Sin cambios respecto al predeterminado'}>↺ Restaurar predeterminado</button>
           {/if}
         </div>
       </header>
@@ -116,7 +121,7 @@
           <h3>Validez clínica</h3>
           <p class="hint">Si está desactivado, el preset no aparecerá como opción para examen clínico (sí se puede usar en práctica formativa).</p>
           <label class="row-line">
-            <input type="checkbox" checked={active.clinicallyValid} disabled={!editable}
+            <input type="checkbox" checked={active.clinicallyValid}
               onchange={(e) => patch({ clinicallyValid: (e.currentTarget as HTMLInputElement).checked })} />
             <span>Apto para examen clínico</span>
           </label>
@@ -128,7 +133,7 @@
           <label>
             <span>Tolerancia (°)</span>
             <input type="number" min="1" max="45" step="1"
-              value={active.poseTolDeg} disabled={!editable}
+              value={active.poseTolDeg}
               oninput={(e) => patch({ poseTolDeg: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
         </div>
@@ -139,19 +144,19 @@
           <label>
             <span>Horizontal — yaw (°)</span>
             <input type="number" min="1" max="60" step="1"
-              value={active.yawTol} disabled={!editable}
+              value={active.yawTol}
               oninput={(e) => patch({ yawTol: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
           <label>
             <span>Vertical — pitch (°)</span>
             <input type="number" min="1" max="60" step="1"
-              value={active.pitchTol} disabled={!editable}
+              value={active.pitchTol}
               oninput={(e) => patch({ pitchTol: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
           <label>
             <span>Inclinación — roll (°)</span>
             <input type="number" min="1" max="60" step="1"
-              value={active.rollTol} disabled={!editable}
+              value={active.rollTol}
               oninput={(e) => patch({ rollTol: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
         </div>
@@ -162,13 +167,13 @@
           <label>
             <span>Horizontal — ampMin H (°)</span>
             <input type="number" min="0" max="30" step="1"
-              value={active.ampMinH} disabled={!editable}
+              value={active.ampMinH}
               oninput={(e) => patch({ ampMinH: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
           <label>
             <span>Vertical — ampMin V (°)</span>
             <input type="number" min="0" max="30" step="1"
-              value={active.ampMinV} disabled={!editable}
+              value={active.ampMinV}
               oninput={(e) => patch({ ampMinV: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
         </div>
@@ -179,13 +184,13 @@
           <label>
             <span>Mínima</span>
             <input type="number" min="30" max="300" step="5"
-              value={active.peakMin} disabled={!editable}
+              value={active.peakMin}
               oninput={(e) => patch({ peakMin: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
           <label>
             <span>Máxima</span>
             <input type="number" min="100" max="500" step="5"
-              value={active.peakMax} disabled={!editable}
+              value={active.peakMax}
               oninput={(e) => patch({ peakMax: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
         </div>
@@ -196,13 +201,13 @@
           <label>
             <span>Mínima</span>
             <input type="number" min="30" max="300" step="10"
-              value={active.durMinMs} disabled={!editable}
+              value={active.durMinMs}
               oninput={(e) => patch({ durMinMs: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
           <label>
             <span>Máxima</span>
             <input type="number" min="100" max="600" step="10"
-              value={active.durMaxMs} disabled={!editable}
+              value={active.durMaxMs}
               oninput={(e) => patch({ durMaxMs: +(e.currentTarget as HTMLInputElement).value })} />
           </label>
         </div>
@@ -213,28 +218,28 @@
           <label>
             <span>Horizontal — mín H</span>
             <input type="number" min="0" max="10000" step="100"
-              value={active.accelMinH ?? ''} disabled={!editable}
+              value={active.accelMinH ?? ''}
               placeholder="ignorar"
               oninput={(e) => patch({ accelMinH: parseAccel((e.currentTarget as HTMLInputElement).value) })} />
           </label>
           <label>
             <span>Horizontal — máx H</span>
             <input type="number" min="0" max="10000" step="100"
-              value={active.accelMaxH ?? ''} disabled={!editable}
+              value={active.accelMaxH ?? ''}
               placeholder="ignorar"
               oninput={(e) => patch({ accelMaxH: parseAccel((e.currentTarget as HTMLInputElement).value) })} />
           </label>
           <label>
             <span>Vertical — mín V</span>
             <input type="number" min="0" max="10000" step="100"
-              value={active.accelMinV ?? ''} disabled={!editable}
+              value={active.accelMinV ?? ''}
               placeholder="ignorar"
               oninput={(e) => patch({ accelMinV: parseAccel((e.currentTarget as HTMLInputElement).value) })} />
           </label>
           <label>
             <span>Vertical — máx V</span>
             <input type="number" min="0" max="10000" step="100"
-              value={active.accelMaxV ?? ''} disabled={!editable}
+              value={active.accelMaxV ?? ''}
               placeholder="ignorar"
               oninput={(e) => patch({ accelMaxV: parseAccel((e.currentTarget as HTMLInputElement).value) })} />
           </label>
@@ -298,6 +303,9 @@
     border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; color: inherit;
   }
   .hd-actions button:hover { border-color: var(--primary); }
+  .hd-actions button.reset { border-color: var(--warning, #d97706); color: var(--warning, #d97706); }
+  .hd-actions button.reset:hover:not(:disabled) { background: var(--warning, #d97706); color: white; }
+  .hd-actions button:disabled { opacity: .4; cursor: not-allowed; }
 
   .grid {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;

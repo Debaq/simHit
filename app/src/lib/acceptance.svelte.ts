@@ -7,7 +7,7 @@
 //
 // Cuatro niveles alineados con literatura vHIT:
 //   - inicial   ("Aprendiendo el gesto") — no clínico, solo práctica.
-//   - basico    ("Novato")               — no clínico, práctica y examen formativo.
+//   - basico    ("Novato")               — clínico (formativo/permisivo) y práctica.
 //   - estandar  ("Usable")               — clínico.
 //   - avanzado  ("Experto")              — clínico.
 //
@@ -127,12 +127,12 @@ const BUILTIN: AcceptancePreset[] = [
     peakMin: 0, peakMax: 0, durMinMs: 0, durMaxMs: 0,
   }),
   // Nivel 2 — Básico ("Novato"). Rangos amplios pero ya con aceleración.
-  // No es clínicamente válido todavía: sirve para examen formativo.
+  // Apto para examen clínico formativo (criterios permisivos).
   makeBuiltin({
     id: 'basico',
     name: 'Básico — Novato',
     builtin: true,
-    clinicallyValid: false,
+    clinicallyValid: true,
     yawTol: 8, pitchTol: 7, rollTol: 15,
     ampMinH: 5, ampMinV: 3,
     peakMinH: 80,  peakMaxH: 149,
@@ -183,6 +183,9 @@ const BUILTIN: AcceptancePreset[] = [
 
 const LS_PRESETS = 'simhit:acceptance:presets';
 const LS_ACTIVE = 'simhit:acceptance:active';
+const LS_BUILTIN_OVERRIDES = 'simhit:acceptance:builtin-overrides';
+
+type BuiltinOverride = Partial<AcceptanceCfg> & { name?: string; clinicallyValid?: boolean };
 
 /** Normaliza un preset legado: conserva sólo los campos del schema actual.
  *  Si vienen los campos sin sufijo (peakMin/peakMax/etc.), se duplican como
@@ -262,6 +265,17 @@ function loadCustom(): AcceptancePreset[] {
   } catch { return []; }
 }
 
+function loadBuiltinOverrides(): Record<string, BuiltinOverride> {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(LS_BUILTIN_OVERRIDES);
+    if (!raw) return {};
+    const o = JSON.parse(raw);
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return {};
+    return o as Record<string, BuiltinOverride>;
+  } catch { return {}; }
+}
+
 function loadActiveId(): string {
   if (typeof localStorage === 'undefined') return 'estandar';
   const v = localStorage.getItem(LS_ACTIVE) || 'estandar';
@@ -273,9 +287,22 @@ function loadActiveId(): string {
 class AcceptanceStore {
   custom = $state<AcceptancePreset[]>(loadCustom());
   activeId = $state<string>(loadActiveId());
+  builtinOverrides = $state<Record<string, BuiltinOverride>>(loadBuiltinOverrides());
+
+  private applyOverride(p: AcceptancePreset): AcceptancePreset {
+    const ov = this.builtinOverrides[p.id];
+    if (!ov) return p;
+    return withLegacyAliases({ ...p, ...ov }) as AcceptancePreset;
+  }
 
   get all(): AcceptancePreset[] {
-    return [...BUILTIN, ...this.custom];
+    return [...BUILTIN.map((p) => this.applyOverride(p)), ...this.custom];
+  }
+
+  /** Indica si un preset builtin tiene overrides aplicados (no está en defaults). */
+  isBuiltinModified(id: string): boolean {
+    const ov = this.builtinOverrides[id];
+    return !!ov && Object.keys(ov).length > 0;
   }
 
   /** Sólo los presets aptos para examen clínico (estándar/avanzado y
@@ -297,6 +324,10 @@ class AcceptanceStore {
 
   private persist() {
     try { localStorage.setItem(LS_PRESETS, JSON.stringify(this.custom)); } catch {}
+  }
+
+  private persistOverrides() {
+    try { localStorage.setItem(LS_BUILTIN_OVERRIDES, JSON.stringify(this.builtinOverrides)); } catch {}
   }
 
   /** Crea un preset propio a partir de los valores actuales o de uno base. */
@@ -327,6 +358,12 @@ class AcceptanceStore {
     // Si vienen campos legados (peakMin, etc.), se traducen a *H antes de
     // aplicar; luego se rearman los alias para mantener consistencia.
     const migrated = migratePatchLegacy(patch);
+    if (BUILTIN.some((b) => b.id === id)) {
+      const current = this.builtinOverrides[id] ?? {};
+      this.builtinOverrides = { ...this.builtinOverrides, [id]: { ...current, ...migrated } };
+      this.persistOverrides();
+      return;
+    }
     this.custom = this.custom.map((p) => {
       if (p.id !== id) return p;
       return withLegacyAliases({ ...p, ...migrated }) as AcceptancePreset;
@@ -334,7 +371,17 @@ class AcceptanceStore {
     this.persist();
   }
 
+  /** Restaura un preset builtin a sus valores predeterminados. */
+  resetBuiltin(id: string) {
+    if (!BUILTIN.some((b) => b.id === id)) return;
+    if (!(id in this.builtinOverrides)) return;
+    const { [id]: _drop, ...rest } = this.builtinOverrides;
+    this.builtinOverrides = rest;
+    this.persistOverrides();
+  }
+
   remove(id: string) {
+    if (BUILTIN.some((b) => b.id === id)) return;
     this.custom = this.custom.filter((p) => p.id !== id);
     this.persist();
     if (this.activeId === id) this.setActive('estandar');

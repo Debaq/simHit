@@ -319,7 +319,7 @@
                 </optgroup>
               {/if}
             </select>
-            <p class="hint-line">Solo se listan presets aptos para examen clínico. Para los niveles formativos (inicial/básico) usa el modo práctica.</p>
+            <p class="hint-line">Solo se listan presets aptos para examen clínico (básico, estándar, avanzado). Para el nivel inicial usa el modo práctica.</p>
             {#if acceptanceActive}
               <div class="summary-grid">
                 <div><span>Amplitud</span> ±{acceptanceActive.yawTol}° H / ±{acceptanceActive.pitchTol}° V / ±{acceptanceActive.rollTol}° R</div>

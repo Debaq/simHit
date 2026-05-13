@@ -76,6 +76,8 @@ class ScenarioStore {
   list = $state<Scenario[]>([]);
   activeId = $state<string | null>(null);
   loaded = $state(false);
+  /** Ids de ejemplos con overrides persistidos (modificados respecto al default). */
+  modifiedExamples = $state<Set<string>>(new Set());
 
   active = $derived(
     this.examples.find((s) => s.id === this.activeId) ??
@@ -85,13 +87,13 @@ class ScenarioStore {
   isExampleActive = $derived(!!this.examples.find((s) => s.id === this.activeId));
 
   async load() {
-    this.examples = buildExampleCases();
+    const defaults = buildExampleCases();
 
     // Limpiar legacy localStorage (formato viejo de nodos).
     try { localStorage.removeItem(LEGACY_KEY); } catch {}
 
     const filenames = (await storage.list(SCENARIOS_DIR)).filter((n) => n.endsWith('.json'));
-    const items: Scenario[] = [];
+    const stored = new Map<string, Scenario>();
     for (const fn of filenames) {
       const raw = await storage.readJson<unknown>(`${SCENARIOS_DIR}/${fn}`);
       const s = normalizeScenario(raw);
@@ -100,9 +102,17 @@ class ScenarioStore {
         await storage.remove(`${SCENARIOS_DIR}/${fn}`);
         continue;
       }
-      items.push(s);
+      stored.set(s.id, s);
     }
-    this.list = items.sort((a, b) => b.updated - a.updated);
+
+    // Ejemplos: si hay versión persistida (editada por el docente), usarla; si no, default.
+    this.examples = defaults.map((d) => stored.get(d.id) ?? d);
+    this.modifiedExamples = new Set(defaults.filter((d) => stored.has(d.id)).map((d) => d.id));
+    // Lista de "míos": todo lo persistido que no sea un id de ejemplo.
+    const defaultIds = new Set(defaults.map((d) => d.id));
+    this.list = [...stored.values()]
+      .filter((s) => !defaultIds.has(s.id))
+      .sort((a, b) => b.updated - a.updated);
 
     try { this.activeId = localStorage.getItem(ACTIVE_KEY); } catch {}
     if (!this.activeId || !this.findScenario(this.activeId)) {
@@ -113,6 +123,11 @@ class ScenarioStore {
 
   private findScenario(id: string): Scenario | null {
     return this.examples.find((s) => s.id === id) ?? this.list.find((s) => s.id === id) ?? null;
+  }
+
+  /** Indica si el id corresponde a un ejemplo predefinido (vs caso del docente). */
+  isExampleId(id: string): boolean {
+    return id.startsWith('example-');
   }
 
   private persist(s: Scenario) {
@@ -151,6 +166,7 @@ class ScenarioStore {
   }
 
   remove(id: string) {
+    if (this.isExampleId(id)) return; // los ejemplos no se eliminan, se restauran
     this.list = this.list.filter((s) => s.id !== id);
     if (this.activeId === id) this.activeId = this.list[0]?.id ?? this.examples[0]?.id ?? null;
     void storage.remove(`${SCENARIOS_DIR}/${id}.json`);
@@ -158,12 +174,13 @@ class ScenarioStore {
   }
 
   rename(id: string, name: string) {
-    const s = this.list.find((x) => x.id === id);
+    const s = this.findScenario(id);
     if (!s) return;
     s.name = name;
     s.updated = Date.now();
     this.persist(s);
-    this.list = [...this.list];
+    if (this.isExampleId(id)) this.examples = [...this.examples];
+    else this.list = [...this.list];
   }
 
   setActive(id: string) {
@@ -172,12 +189,38 @@ class ScenarioStore {
   }
 
   updateChannel(scenarioId: string, channel: Channel, patch: Partial<ChannelConfig>) {
-    const s = this.list.find((x) => x.id === scenarioId);
+    const s = this.findScenario(scenarioId);
     if (!s) return;
     s.channels[channel] = { ...s.channels[channel], ...patch };
     s.updated = Date.now();
-    this.list = [...this.list];
+    if (this.isExampleId(scenarioId)) {
+      this.examples = [...this.examples];
+      if (!this.modifiedExamples.has(scenarioId)) {
+        this.modifiedExamples = new Set([...this.modifiedExamples, scenarioId]);
+      }
+    } else {
+      this.list = [...this.list];
+    }
     this.persist(s);
+  }
+
+  /** Restaura un ejemplo predefinido a sus valores originales (borra overrides). */
+  async resetExample(id: string) {
+    if (!this.isExampleId(id)) return;
+    const def = buildExampleCases().find((d) => d.id === id);
+    if (!def) return;
+    this.examples = this.examples.map((s) => (s.id === id ? def : s));
+    if (this.modifiedExamples.has(id)) {
+      const next = new Set(this.modifiedExamples);
+      next.delete(id);
+      this.modifiedExamples = next;
+    }
+    await storage.remove(`${SCENARIOS_DIR}/${id}.json`);
+  }
+
+  /** Indica si un ejemplo tiene cambios persistidos respecto a sus valores originales. */
+  isExampleModified(id: string): boolean {
+    return this.modifiedExamples.has(id);
   }
 
   setChannelArtifacts(scenarioId: string, channel: Channel, artifacts: ArtifactConfig[]) {
