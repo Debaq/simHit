@@ -24,17 +24,17 @@
     targetChannel = undefined as Channel | 'vert-any' | undefined,
   } = $props();
 
-  // ── Pose objetivo por canal (F0.5) ──────────────────────────────────────
-  // Los planos verticales parten con la cabeza girada ±45° en yaw. El pitch
-  // objetivo es 0 (cabeza neutra en cabeceo): el impulso pitch se realiza
-  // DESDE esa pose, no antes de ella.
+  // ── Pose objetivo por canal ───────────────────────────────────────────
+  // Horizontal (LL/RL): pitch=-30° (chin-down clínico, no neutro).
+  // Verticales LARP/RALP: cabeza girada ±45° en yaw, pitch neutro.
+  // Replica las constantes del pipeline de detectores (pose-initial.ts).
   const POSE_TARGETS: Record<Channel, { yaw: number; pitch: number }> = {
-    LL: { yaw: 0,   pitch: 0 },
-    RL: { yaw: 0,   pitch: 0 },
-    LA: { yaw: -45, pitch: 0 },  // LARP
-    RP: { yaw: -45, pitch: 0 },  // LARP
-    RA: { yaw: +45, pitch: 0 },  // RALP
-    LP: { yaw: +45, pitch: 0 },  // RALP
+    LL: { yaw: 0,   pitch: -30 },
+    RL: { yaw: 0,   pitch: -30 },
+    LA: { yaw: -45, pitch:   0 },  // LARP
+    RP: { yaw: -45, pitch:   0 },  // LARP
+    RA: { yaw: +45, pitch:   0 },  // RALP
+    LP: { yaw: +45, pitch:   0 },  // RALP
   };
 
   function isVerticalChannel(c: Channel): boolean {
@@ -146,6 +146,15 @@
     yawTargets[0]);
   });
 
+  /** Pitch objetivo según canal: -30° (chin-down) para canal horizontal
+   *  específico; 0 para verticales o sin canal. */
+  let activePitchTarget = $derived.by<number>(() => {
+    if (targetChannel && targetChannel !== 'vert-any') {
+      return POSE_TARGETS[targetChannel].pitch;
+    }
+    return 0;
+  });
+
   /** Mensaje "gira más a izq/der hacia ~45°" para planos verticales. */
   function yawCorrection(): string | null {
     if (yawTargets.length === 0) return null;
@@ -155,21 +164,41 @@
     return `gira la cabeza más a la ${side} hasta ~${Math.abs(activeYawTarget)}°`;
   }
 
+  /** Mensaje "baja/sube la barbilla hacia ~-30°" para canal horizontal. */
+  function pitchCorrection(): string | null {
+    if (activePitchTarget === 0) return null;
+    const delta = pitch - activePitchTarget;
+    if (Math.abs(delta) <= PITCH_TOL) return null;
+    return delta > 0
+      ? `baja la barbilla hasta ~${activePitchTarget}°`
+      : `sube la barbilla hasta ~${activePitchTarget}°`;
+  }
+
   let poseOk = $derived(
     Math.abs(yaw - activeYawTarget) <= YAW_TOL &&
-    Math.abs(pitch) <= PITCH_TOL &&
+    Math.abs(pitch - activePitchTarget) <= PITCH_TOL &&
     Math.abs(roll) <= ROLL_TOL
   );
   let poseLabel = $derived.by(() => {
     if (poseOk) {
-      const txt = yawTargets.length > 0 ? `Pose objetivo OK (yaw ~${activeYawTarget}°)` : 'Pose neutra OK';
+      let txt: string;
+      if (yawTargets.length > 0) {
+        txt = `Pose objetivo OK (yaw ~${activeYawTarget}°)`;
+      } else if (activePitchTarget !== 0) {
+        txt = `Pose objetivo OK (chin-down ~${activePitchTarget}°)`;
+      } else {
+        txt = 'Pose neutra OK';
+      }
       return { txt, cls: 'ok' };
     }
     const yawErr = yawCorrection();
     if (yawErr) return { txt: 'Corregir: ' + yawErr, cls: 'warn' };
+    const pitchErr = pitchCorrection();
+    if (pitchErr) return { txt: 'Corregir: ' + pitchErr, cls: 'warn' };
     const errs = [
       { v: Math.abs(yaw) - YAW_TOL, msg: yaw < 0 ? 'gira a la derecha' : 'gira a la izquierda' },
-      { v: Math.abs(pitch) - PITCH_TOL, msg: pitch < 0 ? 'baja la cabeza' : 'sube la cabeza' },
+      { v: Math.abs(pitch - activePitchTarget) - PITCH_TOL,
+        msg: (pitch - activePitchTarget) < 0 ? 'baja la cabeza' : 'sube la cabeza' },
       { v: Math.abs(roll) - ROLL_TOL, msg: roll < 0 ? 'inclina al lado opuesto (der.)' : 'inclina al lado opuesto (izq.)' },
     ].filter((e) => e.v > 0).sort((a, b) => b.v - a.v);
     return { txt: 'Corregir: ' + (errs[0]?.msg ?? ''), cls: 'warn' };
@@ -182,16 +211,18 @@
   let yawScale = $derived(Math.cos((yaw * Math.PI) / 180));
   let yawAbsScaled = $derived(Math.max(0.35, Math.abs(yawScale)));
   let eyeShift = $derived(14 * Math.sin((yaw * Math.PI) / 180));
-  let pitchA = $derived((-PITCH_TOL * Math.PI) / 180);
-  let pitchB = $derived((PITCH_TOL * Math.PI) / 180);
+  // Zona verde del dial pitch centrada en activePitchTarget (chin-down -30°
+  // para canal horizontal, 0 para verticales/sin canal).
+  let pitchA = $derived(((activePitchTarget - PITCH_TOL) * Math.PI) / 180);
+  let pitchB = $derived(((activePitchTarget + PITCH_TOL) * Math.PI) / 180);
 
   // Banda amarilla: 2× la tolerancia (zona de advertencia)
   const WARN_MULT = 2;
   let YAW_WARN = $derived(YAW_TOL * WARN_MULT);
   let PITCH_WARN = $derived(PITCH_TOL * WARN_MULT);
   let ROLL_WARN = $derived(ROLL_TOL * WARN_MULT);
-  let pitchWA = $derived((-PITCH_WARN * Math.PI) / 180);
-  let pitchWB = $derived((PITCH_WARN * Math.PI) / 180);
+  let pitchWA = $derived(((activePitchTarget - PITCH_WARN) * Math.PI) / 180);
+  let pitchWB = $derived(((activePitchTarget + PITCH_WARN) * Math.PI) / 180);
 
   // ── Autocalibración de yaw ───────────────────────────────────────────────
   // Trigger: |poseYaw| > YAW_TOL (fuera del verde) + conectado.
@@ -230,7 +261,7 @@
       // Si pitch o roll están fuera de la banda amarilla, el equipo no está
       // sobre la cabeza (apoyado en mesa, descolgado, etc.). No auto-calibrar.
       const headMounted =
-        Math.abs(serial.posePitch) <= PITCH_WARN &&
+        Math.abs(serial.posePitch - activePitchTarget) <= PITCH_WARN &&
         Math.abs(serial.poseRoll) <= ROLL_WARN;
       const gyroQuiet =
         Math.abs(serial.gyroYaw) < STILL_THRESH &&
@@ -535,7 +566,7 @@
           <text x="-92" y="-32" font-size="9" fill="var(--text-muted)">LATERAL</text>
           <text x="94"  y="3" font-size="11" fill="var(--text-muted)">F</text>
           <text x="-98" y="3" font-size="11" fill="var(--text-muted)">A</text>
-          {#if Math.abs(pitch) > PITCH_WARN}
+          {#if Math.abs(pitch - activePitchTarget) > PITCH_WARN}
             <g class="calibra">
               <rect x="-70" y="-15" width="140" height="28" rx="4" fill="var(--danger)" />
               <text x="0" y="5" text-anchor="middle" font-size="20" font-weight="900" fill="white">¡Calibrar!</text>
@@ -552,7 +583,7 @@
         </div>
         <div class="ro">
           <span class="ro-lab">pitch</span>
-          <b class:warn={Math.abs(pitch) > PITCH_TOL}>{pitch.toFixed(1)}°</b>
+          <b class:warn={Math.abs(pitch - activePitchTarget) > PITCH_TOL}>{pitch.toFixed(1)}°</b>
         </div>
         <div class="ro">
           <span class="ro-lab">roll</span>
