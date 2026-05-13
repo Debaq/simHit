@@ -1,0 +1,65 @@
+{
+  "title": "SimHIT: simulador open source para entrenamiento del Head Impulse Test",
+  "description": "SimHIT es una plataforma educativa abierta para enseñar y practicar el Head Impulse Test asistido por video (vHIT). Combina unas gafas instrumentadas con el mismo peso, forma y sensores que un equipo vHIT clínico (la única pieza ausente es la cámara ocular, reemplazada por un paciente virtual simulado por software), una aplicación de escritorio multiplataforma que mide la técnica del impulso cefálico con los mismos criterios que un equipo comercial (amplitud, velocidad pico, duración, dirección 3D) y un motor de simulación de patologías vestibulares (hipofunciones uni/bilaterales, sacadas correctivas covert y overt, artefactos). El sistema genera un informe clínico estructurado exportable a PDF, y articula dos modos pedagógicos: modo práctica (entrenamiento del gesto motor) y modo simulación (examen clínico completo sobre un compañero que lleva las gafas, con caso ciego programado por el docente).",
+  "upload_type": "software",
+  "license": "MIT",
+  "access_right": "open",
+  "language": "spa",
+  "version": "2026.05",
+  "publication_date": "2026-05-13",
+  "creators": [
+    {
+      "name": "Baier-Quezada, Nicolás",
+      "affiliation": "Universidad Austral de Chile",
+      "orcid": "0000-0003-2818-0990"
+    },
+    {
+      "name": "Uribe-Hernández, Vanessa Soledad",
+      "affiliation": "Universidad Austral de Chile",
+      "orcid": "0009-0003-0795-7921"
+    },
+    {
+      "name": "López-Moncada, Fernanda",
+      "affiliation": "Universidad Austral de Chile",
+      "orcid": "0000-0002-0810-7684"
+    },
+    {
+      "name": "Poza-Nauto, Pablo",
+      "affiliation": "Universidad Austral de Chile"
+    },
+    {
+      "name": "Barrientos-Tolero, Haydeé",
+      "affiliation": "Universidad Austral de Chile",
+      "orcid": "0000-0002-3306-4161"
+    },
+    {
+      "name": "Araneda-Aranda, Rocío",
+      "affiliation": "Universidad Austral de Chile"
+    }
+  ],
+  "keywords": [
+    "vHIT",
+    "Head Impulse Test",
+    "reflejo vestíbulo-ocular",
+    "VOR",
+    "otoneurología",
+    "vestibular",
+    "simulación clínica",
+    "educación médica",
+    "hardware abierto",
+    "open source",
+    "ESP32",
+    "IMU",
+    "Tauri",
+    "SvelteKit"
+  ],
+  "communities": [],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/Debaq/simHit",
+      "relation": "isSupplementTo",
+      "resource_type": "software",
+      "scheme": "url"
+    }
+  ]
+}

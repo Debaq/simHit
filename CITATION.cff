@@ -1,0 +1,62 @@
+cff-version: 1.2.0
+message: "Si usás SimHIT en docencia o investigación, citá este trabajo como se indica a continuación."
+title: "SimHIT: simulador open source para entrenamiento del Head Impulse Test"
+abstract: >-
+  SimHIT es una plataforma educativa abierta para enseñar y practicar
+  el Head Impulse Test asistido por video (vHIT). Combina unas gafas
+  instrumentadas con el mismo peso, forma y sensores que un equipo
+  vHIT clínico (la única pieza ausente es la cámara ocular, reemplazada
+  por un paciente virtual simulado por software), una aplicación de
+  escritorio multiplataforma que mide la técnica del impulso cefálico
+  con los mismos criterios que un equipo comercial (amplitud, velocidad
+  pico, duración, dirección 3D) y un motor de simulación de patologías
+  vestibulares (hipofunciones uni/bilaterales, sacadas correctivas covert
+  y overt, artefactos). El sistema permite generar un informe clínico
+  estructurado exportable a PDF, y articula dos modos pedagógicos: modo
+  práctica (entrenamiento del gesto motor) y modo simulación (examen
+  clínico completo sobre un compañero que lleva las gafas, con caso
+  ciego programado por el docente).
+type: software
+authors:
+  - given-names: Nicolás
+    family-names: Baier-Quezada
+    affiliation: Universidad Austral de Chile
+    orcid: https://orcid.org/0000-0003-2818-0990
+  - given-names: Vanessa Soledad
+    family-names: Uribe-Hernández
+    affiliation: Universidad Austral de Chile
+    orcid: https://orcid.org/0009-0003-0795-7921
+  - given-names: Fernanda
+    family-names: López-Moncada
+    affiliation: Universidad Austral de Chile
+    orcid: https://orcid.org/0000-0002-0810-7684
+  - given-names: Pablo
+    family-names: Poza-Nauto
+    affiliation: Universidad Austral de Chile
+  - given-names: Haydeé
+    family-names: Barrientos-Tolero
+    affiliation: Universidad Austral de Chile
+    orcid: https://orcid.org/0000-0002-3306-4161
+  - given-names: Rocío
+    family-names: Araneda-Aranda
+    affiliation: Universidad Austral de Chile
+version: "2026.05"
+date-released: "2026-05-13"
+license: MIT
+repository-code: "https://github.com/Debaq/simHit"
+url: "https://github.com/Debaq/simHit"
+keywords:
+  - vHIT
+  - Head Impulse Test
+  - reflejo vestíbulo-ocular
+  - VOR
+  - otoneurología
+  - vestibular
+  - simulación clínica
+  - educación médica
+  - hardware abierto
+  - open source
+  - ESP32
+  - IMU
+  - Tauri
+  - SvelteKit

@@ -228,7 +228,7 @@ En SimHIT el alumno entrena los pasos 1, 3, 4, 5 y 6 sin riesgo. Los pasos 2 y 7
 
 Proyecto académico de la **Universidad Austral de Chile**, abierto a uso e implementación por otras instituciones bajo Licencia MIT.
 
-> Ávila D., Baier N. *SimHIT: simulador open source para entrenamiento del Head Impulse Test.* Universidad Austral de Chile, 2026.
+> Baier-Quezada N., Uribe-Hernández V. S., López-Moncada F., Poza-Nauto P., Barrientos-Tolero H., Araneda-Aranda R. *SimHIT: simulador open source para entrenamiento del Head Impulse Test.* Universidad Austral de Chile, 2026.
 
 Contacto: `david.avila@uach.cl`
 
