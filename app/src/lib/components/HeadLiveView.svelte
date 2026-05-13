@@ -112,6 +112,121 @@
   let ROLL_WARN = $derived(ROLL_TOL * WARN_MULT);
   let pitchWA = $derived((-PITCH_WARN * Math.PI) / 180);
   let pitchWB = $derived((PITCH_WARN * Math.PI) / 180);
+
+  // ── Autocalibración de yaw ───────────────────────────────────────────────
+  // Trigger: |poseYaw| > YAW_TOL (fuera del verde) + conectado.
+  // Espera quietud sostenida → countdown 3s → IMU CAL. Si se mueve durante
+  // el countdown se aborta sin tocar la calibración previa. Cooldown tras
+  // done/fail evita re-disparos inmediatos.
+  const STILL_THRESH = 1.5;     // °/s en cada eje
+  const STILL_HOLD_MS = 1000;
+  const COUNTDOWN_MS = 3000;
+  const COOLDOWN_MS = 5000;
+
+  type AutoCalState = 'idle' | 'waiting' | 'countdown' | 'calibrating' | 'unmounted';
+  let autoCalState = $state<AutoCalState>('idle');
+  let autoCalRemaining = $state(0); // ms restantes del countdown
+  let stableSince = 0;
+  let countdownStartedAt = 0;
+  let cooldownUntil = 0;
+  let calStartedAt = 0;
+
+  let autoCalLabel = $derived.by(() => {
+    if (autoCalState === 'countdown') return `QUIETO ${Math.ceil(autoCalRemaining / 1000)}`;
+    if (autoCalState === 'calibrating') return 'CALIBRANDO…';
+    if (autoCalState === 'waiting') return 'MANTENER QUIETO';
+    if (autoCalState === 'unmounted') return '¡Calibrar!';
+    return '';
+  });
+
+  $effect(() => {
+    const id = setInterval(() => {
+      const now = performance.now();
+      const yawNeedsCal = Math.abs(serial.poseYaw) > YAW_TOL;
+      // Si pitch o roll están fuera de la banda amarilla, el equipo no está
+      // sobre la cabeza (apoyado en mesa, descolgado, etc.). No auto-calibrar.
+      const headMounted =
+        Math.abs(serial.posePitch) <= PITCH_WARN &&
+        Math.abs(serial.poseRoll) <= ROLL_WARN;
+      const gyroQuiet =
+        Math.abs(serial.gyroYaw) < STILL_THRESH &&
+        Math.abs(serial.gyroPitch) < STILL_THRESH &&
+        Math.abs(serial.gyroRoll) < STILL_THRESH;
+
+      // Cooldown: silencio total hasta vencer.
+      if (now < cooldownUntil) {
+        if (autoCalState !== 'idle') autoCalState = 'idle';
+        stableSince = 0;
+        return;
+      }
+
+      // Si vuelve al verde, abortar todo silenciosamente.
+      if (!yawNeedsCal || !serial.connected) {
+        autoCalState = 'idle';
+        stableSince = 0;
+        return;
+      }
+
+      // Sin calibración manual previa, o equipo no montado en cabeza:
+      // solo aviso estático, no auto-calibrar. Requisito: el operador debe
+      // hacer una calibración manual inicial tras conectar.
+      if (!serial.calibrated || !headMounted) {
+        if (autoCalState !== 'calibrating') {
+          autoCalState = 'unmounted';
+          stableSince = 0;
+          autoCalRemaining = 0;
+        }
+        return;
+      }
+
+      if (autoCalState === 'calibrating') {
+        // Esperar a que el firmware responda (calibrated=true → done) o timeout.
+        if (serial.calibrated || now - calStartedAt > 4000) {
+          cooldownUntil = now + COOLDOWN_MS;
+          autoCalState = 'idle';
+        }
+        return;
+      }
+
+      if (autoCalState === 'countdown') {
+        if (!gyroQuiet) {
+          // Se movió: abortar, mantener calibración previa.
+          autoCalState = 'waiting';
+          stableSince = 0;
+          autoCalRemaining = 0;
+          return;
+        }
+        autoCalRemaining = Math.max(0, COUNTDOWN_MS - (now - countdownStartedAt));
+        if (autoCalRemaining <= 0) {
+          autoCalState = 'calibrating';
+          calStartedAt = now;
+          // Reset flag para detectar el nuevo 'IMU CAL done' (ya era true).
+          serial.calibrated = false;
+          serial.sendCommand('IMU CAL').catch(() => {
+            cooldownUntil = performance.now() + COOLDOWN_MS;
+            autoCalState = 'idle';
+          });
+        }
+        return;
+      }
+
+      // idle / waiting
+      if (!gyroQuiet) {
+        stableSince = 0;
+        autoCalState = 'waiting';
+        return;
+      }
+      if (stableSince === 0) stableSince = now;
+      if (now - stableSince >= STILL_HOLD_MS) {
+        autoCalState = 'countdown';
+        countdownStartedAt = now;
+        autoCalRemaining = COUNTDOWN_MS;
+      } else {
+        autoCalState = 'waiting';
+      }
+    }, 100);
+    return () => clearInterval(id);
+  });
 </script>
 
 <div class="live">
@@ -215,10 +330,25 @@
           <line x1="-3" y1="0" x2="3" y2="0" stroke="var(--text-muted)" />
           <line x1="0" y1="-3" x2="0" y2="0" stroke="var(--text-muted)" />
           <text x="-92" y="-86" font-size="9" fill="var(--text-muted)">SUPERIOR</text>
-          {#if Math.abs(yaw) > YAW_WARN}
-            <g class="calibra">
+          {#if autoCalState === 'countdown'}
+            <g class="autocal countdown">
+              <rect x="-78" y="-26" width="156" height="36" rx="6" fill="var(--danger)" />
+              <text x="0" y="0" text-anchor="middle" font-size="22" font-weight="900" fill="white">{autoCalLabel}</text>
+            </g>
+          {:else if autoCalState === 'calibrating'}
+            <g class="autocal">
+              <rect x="-78" y="-22" width="156" height="28" rx="4" fill="#0ea5e9" />
+              <text x="0" y="-2" text-anchor="middle" font-size="18" font-weight="800" fill="white">{autoCalLabel}</text>
+            </g>
+          {:else if autoCalState === 'waiting'}
+            <g class="autocal">
+              <rect x="-78" y="-22" width="156" height="28" rx="4" fill="var(--danger)" />
+              <text x="0" y="-2" text-anchor="middle" font-size="16" font-weight="800" fill="white">{autoCalLabel}</text>
+            </g>
+          {:else if autoCalState === 'unmounted'}
+            <g class="autocal">
               <rect x="-70" y="-22" width="140" height="28" rx="4" fill="var(--danger)" />
-              <text x="0" y="-2" text-anchor="middle" font-size="20" font-weight="900" fill="white">CALIBRA!!!</text>
+              <text x="0" y="-2" text-anchor="middle" font-size="20" font-weight="900" fill="white">{autoCalLabel}</text>
             </g>
           {/if}
         </svg>
@@ -259,7 +389,7 @@
           {#if Math.abs(roll) > ROLL_WARN}
             <g class="calibra">
               <rect x="-70" y="-22" width="140" height="28" rx="4" fill="var(--danger)" />
-              <text x="0" y="-2" text-anchor="middle" font-size="20" font-weight="900" fill="white">CALIBRA!!!</text>
+              <text x="0" y="-2" text-anchor="middle" font-size="20" font-weight="900" fill="white">¡Calibrar!</text>
             </g>
           {/if}
         </svg>
@@ -299,7 +429,7 @@
           {#if Math.abs(pitch) > PITCH_WARN}
             <g class="calibra">
               <rect x="-70" y="-15" width="140" height="28" rx="4" fill="var(--danger)" />
-              <text x="0" y="5" text-anchor="middle" font-size="20" font-weight="900" fill="white">CALIBRA!!!</text>
+              <text x="0" y="5" text-anchor="middle" font-size="20" font-weight="900" fill="white">¡Calibrar!</text>
             </g>
           {/if}
         </svg>
