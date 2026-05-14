@@ -39,7 +39,7 @@
 // Versión del firmware. Sincronizar con firmware/manifest.json cada vez que se
 // haga un release. El cliente la usa para chequear actualizaciones contra el
 // manifest del repo.
-#define FW_VERSION_STRING "1.3.0"
+#define FW_VERSION_STRING "1.3.1"
 
 // ──────────────────── Selección del driver de sensor ────────────────────
 // La CI pasa -DSENSOR_DRIVER=<MACRO> al compilador para producir un .bin por
@@ -392,6 +392,15 @@ float lastGyroDpsX = 0.0f, lastGyroDpsY = 0.0f, lastGyroDpsZ = 0.0f;
 float lastMagX = 0.0f / 0.0f, lastMagY = 0.0f / 0.0f, lastMagZ = 0.0f / 0.0f;
 float lastTempC = 0.0f / 0.0f;
 
+// Cache de temperatura decimado a ~1 Hz. La temperatura cambia mucho más
+// lento que la tasa de muestreo (200 Hz); leerla en cada tick agrega
+// overhead I²C innecesario. tempTickCounter cuenta hasta TEMP_REFRESH_TICKS
+// y entonces el driver activo recarga cachedTempC; en el medio se emite el
+// último valor conocido.
+static const uint32_t TEMP_REFRESH_TICKS = 200;
+static uint32_t tempTickCounter = 0;
+static float cachedTempC = 0.0f / 0.0f;
+
 static inline float radToDeg(float r) { return r * 57.2957795f; }
 
 // CRC-16 CCITT (poly 0x1021, init 0xFFFF, sin reflexión). Calcula sobre los
@@ -608,9 +617,42 @@ void scanGyroWhoAmI() {
   }
 }
 
-// L3G no expone temperatura del chip por API Adafruit; el LSM303 podría
-// hacerlo pero requiere acceso raw a 0x05/0x06 (no implementado).
-float l3gReadTempC() { return NAN; }
+// LSM303DLHC tiene sensor de temperatura interno expuesto en TEMP_OUT_H/L
+// (registros 0x31/0x32 del mag, NOT en el accel). Para habilitarlo hay que
+// setear bit 7 de CRA_REG_M (0x00 del mag). La librería Adafruit no toca
+// estos registros, así que lo hacemos raw — un solo write al init y reads
+// posteriores. 1 LSB ≈ 1/8 °C, offset cero indeterminado (mejor para drift
+// relativo que para absoluto).
+//
+// Dirección I²C del mag: el bloque mag del LSM303DLHC vive en 0x1E (no en
+// 0x19/0x18 del accel). Adafruit_LSM303DLH_Mag_Unified ya se conectó a ese
+// chip durante setup() pero no enable la temp; le hacemos un write extra.
+#define LSM_MAG_ADDR    0x1E
+#define LSM_CRA_REG_M   0x00
+#define LSM_TEMP_OUT_H  0x31
+static bool lsmTempEnabled = false;
+
+float l3gReadTempC() {
+  if (!lsmTempEnabled) {
+    // Habilitar sensor de temp: bit 7 de CRA_REG_M = 1. Mantener el resto
+    // de la config Adafruit dejó (output rate = 75 Hz por defecto → 0x18).
+    if (writeReg8(LSM_MAG_ADDR, LSM_CRA_REG_M, 0x98)) lsmTempEnabled = true;
+    else return NAN;
+    delay(2);
+  }
+  Wire.beginTransmission((uint8_t)LSM_MAG_ADDR);
+  Wire.write(LSM_TEMP_OUT_H);
+  if (Wire.endTransmission(false) != 0) return NAN;
+  if (Wire.requestFrom((int)LSM_MAG_ADDR, 2) != 2) return NAN;
+  uint8_t h = Wire.read();
+  uint8_t l = Wire.read();
+  // Resultado en 12 bits con signo, alineado a la izquierda (>> 4).
+  int16_t raw = (int16_t)(((uint16_t)h << 8) | l);
+  raw >>= 4;
+  // 1 LSB = 1/8 °C. Offset arbitrario; reportamos lectura relativa con
+  // suposición de offset = 20 °C (típico empírico del LSM303DLHC).
+  return ((float)raw / 8.0f) + 20.0f;
+}
 #endif  // SENSOR_DRIVER == L3G_LSM303
 
 // ─────────── Driver ICM-42688 (SIN testear con hardware) ───────────
@@ -1272,7 +1314,31 @@ void sampleAndFuse() {
   float gx_rad = NAN, gy_rad = NAN, gz_rad = NAN;
   float ax_ms2 = NAN, ay_ms2 = NAN, az_ms2 = NAN;
   float mx_uT  = NAN, my_uT  = NAN, mz_uT  = NAN;
-  float tempC  = NAN;
+
+  // Refresh decimado de temperatura: ~1 Hz (cada TEMP_REFRESH_TICKS muestras).
+  // En el tick correspondiente se llama al ReadTempC del driver activo y se
+  // cachea; el resto de los ticks reemiten el último valor conocido. Esto
+  // permite registrar temperatura por muestra en el CSV de la captura
+  // estática (clave para Allan-variance largo) sin agregar overhead I²C.
+  if (++tempTickCounter >= TEMP_REFRESH_TICKS) {
+    tempTickCounter = 0;
+#if SENSOR_DRIVER == L3G_LSM303
+    cachedTempC = l3gReadTempC();
+#elif SENSOR_DRIVER == ICM_42688
+    cachedTempC = icmReadTempC();
+#elif SENSOR_DRIVER == MPU9250
+    cachedTempC = mpuReadTempC();
+#elif SENSOR_DRIVER == BNO055
+    cachedTempC = bnoReadTempC();
+#elif SENSOR_DRIVER == MPU_6050
+    cachedTempC = mpu6050ReadTempC();
+#elif SENSOR_DRIVER == ITG_ADXL_HMC
+    cachedTempC = itgReadTempC();
+#elif SENSOR_DRIVER == ICM_20948
+    cachedTempC = icm20ReadTempC();
+#endif
+  }
+  float tempC = cachedTempC;
   // Solo el BNO055 expone Eulers ya fusionados.
   float bno_yaw = NAN, bno_pitch = NAN, bno_roll = NAN;
 

@@ -201,6 +201,25 @@
     ambientTempC: 24.8,
     sensorLabel: 'L3GD20H',
   });
+  // El usuario tocó la temperatura manualmente — desactivamos el auto-fill
+  // para no pisarle la edición. Volver a apretar "↻" lo reactiva.
+  let ambientTempUserEdited = $state(false);
+
+  // Sincroniza la temperatura ambiente con la última lectura del sensor,
+  // siempre que el usuario no la haya editado a mano. La temperatura del
+  // chip es una aproximación útil del ambiente para iniciar la captura.
+  $effect(() => {
+    if (!ambientTempUserEdited && Number.isFinite(serial.currentTempC)) {
+      captureCfg.ambientTempC = Math.round(serial.currentTempC * 10) / 10;
+    }
+  });
+
+  function refreshAmbientTempFromSensor() {
+    if (Number.isFinite(serial.currentTempC)) {
+      captureCfg.ambientTempC = Math.round(serial.currentTempC * 10) / 10;
+      ambientTempUserEdited = false;
+    }
+  }
 
   // Sincroniza la etiqueta del sensor con la detección del firmware.
   $effect(() => {
@@ -883,7 +902,28 @@
               </label>
               <label>
                 <span>Temp. ambiente (°C)</span>
-                <input type="number" step="0.1" bind:value={captureCfg.ambientTempC} disabled={capture.stage !== 'idle' && capture.stage !== 'done' && capture.stage !== 'error'} />
+                <div class="temp-row">
+                  <input
+                    type="number" step="0.1"
+                    bind:value={captureCfg.ambientTempC}
+                    oninput={() => (ambientTempUserEdited = true)}
+                    disabled={capture.stage !== 'idle' && capture.stage !== 'done' && capture.stage !== 'error'}
+                  />
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    onclick={refreshAmbientTempFromSensor}
+                    disabled={!Number.isFinite(serial.currentTempC)}
+                    title={Number.isFinite(serial.currentTempC)
+                      ? `Leer del sensor: ${serial.currentTempC.toFixed(1)} °C`
+                      : 'El sensor no expone temperatura (driver actual o desconectado)'}
+                  >↻</button>
+                </div>
+                {#if !ambientTempUserEdited && Number.isFinite(serial.currentTempC)}
+                  <small style="color:var(--text-muted);font-size:11px">Auto del sensor — editá para fijar manual</small>
+                {:else if ambientTempUserEdited && Number.isFinite(serial.currentTempC)}
+                  <small style="color:var(--accent);font-size:11px">Valor manual. Sensor reporta {serial.currentTempC.toFixed(1)} °C</small>
+                {/if}
               </label>
 
               {#if capture.stage === 'idle' || capture.stage === 'error'}
@@ -1562,6 +1602,17 @@
     color: var(--text);
   }
   .form input:disabled { opacity: .5; }
+  .temp-row {
+    display: flex; gap: 6px; align-items: center;
+  }
+  .temp-row input { flex: 1; }
+  .icon-btn {
+    padding: 6px 10px; font-size: 13px;
+    border: 1px solid var(--border-strong); background: var(--surface);
+    border-radius: var(--radius-sm); cursor: pointer; color: var(--text);
+  }
+  .icon-btn:hover:not(:disabled) { background: var(--primary-soft); color: var(--primary); }
+  .icon-btn:disabled { opacity: .45; cursor: not-allowed; }
 
   /* Progress block */
   .prog-block { display: flex; flex-direction: column; gap: 10px; }
