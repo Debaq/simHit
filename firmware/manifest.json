@@ -32,10 +32,10 @@
     }
   ],
   "latest": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "channel": "stable",
-    "released_at": "2026-05-13",
-    "notes": "Versión inicial estampada. Añade banner 'SimHit FW 1.0.0' al boot y comando VERSION para query post-conexión.",
+    "released_at": "2026-05-14",
+    "notes": "v1.1: stream agrega magX/Y/Z (µT) y tempC (°C) por muestra. Banner emite chip-id ESP32 (MAC). Drivers ICM-42688, MPU-9250 y BNO055 disponibles (sin validar con hardware).",
     "min_compatible_app": "2026.5.0",
     "artifacts": [
       {
@@ -43,17 +43,33 @@
         "sensor": "l3g-lsm303",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.0.0/simhit-fw-1.0.0-esp32c3.merged.bin",
-        "sha256": "5791e38b5662648b6f0d97d70fb997789030fc99eabb0fa26dd7a56e22c94ae2",
-        "size_bytes": 4194304
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.1.0/simhit-fw-1.1.0-esp32c3-l3g-lsm303.merged.bin",
+        "sha256": null,
+        "size_bytes": null
       },
       {
         "board": "esp32-c3-supermini",
-        "sensor": "l3g-lsm303",
-        "image_type": "app",
-        "flash_address": 65536,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.0.0/simhit-fw-1.0.0-esp32c3.bin",
-        "sha256": "fe21e29feb77d9f7cf29087ba2d3e802b3f8933b130c96ec97332c9bb38fe35f"
+        "sensor": "icm-42688",
+        "image_type": "merged",
+        "flash_address": 0,
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.1.0/simhit-fw-1.1.0-esp32c3-icm-42688.merged.bin",
+        "sha256": null
+      },
+      {
+        "board": "esp32-c3-supermini",
+        "sensor": "mpu9250",
+        "image_type": "merged",
+        "flash_address": 0,
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.1.0/simhit-fw-1.1.0-esp32c3-mpu9250.merged.bin",
+        "sha256": null
+      },
+      {
+        "board": "esp32-c3-supermini",
+        "sensor": "bno055",
+        "image_type": "merged",
+        "flash_address": 0,
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.1.0/simhit-fw-1.1.0-esp32c3-bno055.merged.bin",
+        "sha256": null
       }
     ]
   },

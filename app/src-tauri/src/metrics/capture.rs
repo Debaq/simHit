@@ -16,6 +16,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 // ──────────────────── Tipos públicos ────────────────────
@@ -116,6 +117,8 @@ struct ActiveSession {
     dt_sum_us: f64,
     dt_sq_sum_us: f64,
     dt_count: u64,
+    // Throttle de eventos: emitir capture://progress a ~4 Hz, no en cada batch.
+    last_emit_ms: u128,
 }
 
 impl ActiveSession {
@@ -198,6 +201,7 @@ pub fn start_static_capture(config: StartCaptureConfig) -> Result<CaptureSession
         dt_sum_us: 0.0,
         dt_sq_sum_us: 0.0,
         dt_count: 0,
+        last_emit_ms: 0,
     };
     *guard = Some(session);
 
@@ -209,8 +213,9 @@ pub fn start_static_capture(config: StartCaptureConfig) -> Result<CaptureSession
     })
 }
 
-#[tauri::command]
-pub fn append_samples(session_id: String, samples: Vec<Sample>) -> Result<u64, CaptureError> {
+// Lógica de append separada del comando Tauri para que los tests la usen sin
+// necesitar AppHandle. Devuelve (samples_written, snapshot_para_evento_o_none).
+fn append_samples_inner(session_id: &str, samples: &[Sample]) -> Result<(u64, Option<CaptureProgress>), CaptureError> {
     let mut guard = ACTIVE.lock().unwrap();
     let s = guard
         .as_mut()
@@ -227,7 +232,7 @@ pub fn append_samples(session_id: String, samples: Vec<Sample>) -> Result<u64, C
     };
 
     let mut line = String::with_capacity(128);
-    for sm in &samples {
+    for sm in samples {
         if let Some(prev) = s.last_timestamp_us {
             let dt = sm.timestamp_us - prev;
             if dt > 0 {
@@ -258,7 +263,36 @@ pub fn append_samples(session_id: String, samples: Vec<Sample>) -> Result<u64, C
         write_line(s, &line)?;
         s.samples_written += 1;
     }
-    Ok(s.samples_written)
+
+    // Throttle de progreso a ~4 Hz: devolvemos un snapshot si toca emitir.
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let snapshot = if now_ms - s.last_emit_ms >= 250 {
+        s.last_emit_ms = now_ms;
+        Some(CaptureProgress {
+            session_id: s.id.clone(),
+            elapsed_s: s.elapsed_s(),
+            total_s: s.config.duration_seconds as f64,
+            samples_written: s.samples_written,
+            samples_lost: s.samples_lost,
+            bytes_written: s.bytes_written,
+        })
+    } else {
+        None
+    };
+
+    Ok((s.samples_written, snapshot))
+}
+
+#[tauri::command]
+pub fn append_samples(app: AppHandle, session_id: String, samples: Vec<Sample>) -> Result<u64, CaptureError> {
+    let (written, snapshot) = append_samples_inner(&session_id, &samples)?;
+    if let Some(prog) = snapshot {
+        let _ = app.emit("capture://progress", prog);
+    }
+    Ok(written)
 }
 
 #[tauri::command]
@@ -422,7 +456,7 @@ mod tests {
         let cfg = default_config(&dir);
         let s = start_static_capture(cfg).expect("start");
         let samples: Vec<Sample> = (0..1000).map(|i| mksample(i * 5000, (i as f64).sin())).collect();
-        append_samples(s.id.clone(), samples).expect("append");
+        append_samples_inner(&s.id, &samples).expect("append");
         let sum = stop_capture(s.id.clone(), Some("complete".into())).expect("stop");
 
         assert_eq!(sum.samples_written, 1000);
@@ -463,7 +497,7 @@ mod tests {
         for i in 0..100 { samples.push(mksample(i * 5000, 0.0)); }
         let last = 99 * 5000;
         for i in 0..100 { samples.push(mksample(last + 20000 + i * 5000, 0.0)); }
-        append_samples(s.id.clone(), samples).unwrap();
+        append_samples_inner(&s.id, &samples).unwrap();
         let sum = stop_capture(s.id, Some("complete".into())).unwrap();
         // El gap declarado fue 20000 µs / 5000 esperado = 4 → 3 muestras perdidas.
         assert_eq!(sum.samples_lost, 3);
@@ -485,7 +519,7 @@ mod tests {
         cleanup();
         let dir = tmp_dir();
         let _ = start_static_capture(default_config(&dir)).unwrap();
-        let err = append_samples("not-the-real-id".into(), vec![mksample(0, 0.0)]).unwrap_err();
+        let err = append_samples_inner("not-the-real-id", &[mksample(0, 0.0)]).unwrap_err();
         assert_eq!(err.code, "SessionMismatch");
         cleanup();
     }
@@ -495,7 +529,7 @@ mod tests {
         cleanup();
         let dir = tmp_dir();
         let s = start_static_capture(default_config(&dir)).unwrap();
-        append_samples(s.id.clone(), vec![mksample(0, 0.5)]).unwrap();
+        append_samples_inner(&s.id, &vec![mksample(0, 0.5)]).unwrap();
         let sum = stop_capture(s.id, Some("complete".into())).unwrap();
         let content = std::fs::read_to_string(&sum.csv_path).unwrap();
         let last = content.lines().last().unwrap();

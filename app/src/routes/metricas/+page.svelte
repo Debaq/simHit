@@ -256,6 +256,19 @@
   let showReference = $state(false);
   let referenceData = $derived(detectedSensor ? SENSOR_REFERENCES[detectedSensor.label] ?? null : null);
 
+  // Info del host (SO, arch, hostname, versión de app) — consultada una vez al
+  // montar la vista. Se incluye en sensor_profile.json para trazabilidad.
+  type HostInfo = { os: string; arch: string; family: string; hostname: string; app_version: string };
+  let hostInfo = $state<HostInfo | null>(null);
+  onMount(async () => {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      hostInfo = await invoke<HostInfo>('get_host_info');
+    } catch (e) {
+      console.warn('get_host_info no disponible', e);
+    }
+  });
+
   function buildProfile() {
     return {
       schema_version: 'simhit-profile-1.0',
@@ -263,6 +276,10 @@
       generated_at_utc: new Date().toISOString(),
       sensor: detectedSensor,
       firmware: firmwareInfo,
+      platform: {
+        ...(hostInfo ?? {}),
+        esp32_mac: serial.espMacAddress,
+      },
       acceptance_preset: { id: acceptance.active.id, name: acceptance.active.name },
       session: {
         id: capture.sessionId,

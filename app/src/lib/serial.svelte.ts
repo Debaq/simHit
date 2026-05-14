@@ -43,6 +43,8 @@ export type RawSample = {
   gx: number; gy: number; gz: number;     // velocidad angular (°/s)
   aax: number; aay: number; aaz: number;  // aceleración angular (°/s²), 0 en legacy
   lax: number; lay: number; laz: number;  // aceleración lineal (m/s²), 0 en legacy
+  mx: number; my: number; mz: number;     // magnetómetro (µT), NaN si no soportado
+  tempC: number;                           // temperatura del chip (°C), NaN si no soportada
   tsMs: number;                            // timestamp del firmware (ms desde boot)
 };
 export type AccelFilterMode = 'SG' | 'IIR' | 'NONE';
@@ -127,6 +129,8 @@ class SerialStore {
   // Versión del firmware (semver) reportada por el banner "SimHit FW x.y.z"
   // o por la respuesta a "VERSION". Null mientras no se haya recibido.
   firmwareVersionString = $state<string | null>(null);
+  // MAC del ESP32 (chip-id). Reportado en el banner como "SimHit MAC AA:BB:..."
+  espMacAddress = $state<string | null>(null);
   // Cola de muestras gyro desde el último drenado por simulator. Evita
   // pérdidas por bursts USB y jitter del setInterval del tick.
   private gyroQueue: Array<{ x: number; y: number; z: number }> = [];
@@ -311,6 +315,7 @@ class SerialStore {
     this.crcErrors = 0;
     this.detectedSensor = null;
     this.firmwareVersionString = null;
+    this.espMacAddress = null;
     try {
       this.sp = new SerialPort({ path, baudRate: FIRMWARE_BAUD });
       await this.sp.open();
@@ -347,6 +352,7 @@ class SerialStore {
     this.calibrated = false;
     this.detectedSensor = null;
     this.firmwareVersionString = null;
+    this.espMacAddress = null;
   }
 
   async sendCommand(cmd: string) {
@@ -406,6 +412,14 @@ class SerialStore {
         return;
       }
     }
+    // Banner de MAC del ESP32: "SimHit MAC AA:BB:CC:DD:EE:FF".
+    {
+      const m = line.match(/^SimHit MAC\s+([0-9A-Fa-f:]{17})\s*$/);
+      if (m) {
+        this.espMacAddress = m[1].toUpperCase();
+        return;
+      }
+    }
     // Banner del firmware: "Gyro WHO_AM_I @0x6B = 0xD7 (L3GD20H)".
     // Capturamos el primer match válido (descarta candidatos sin respuesta).
     if (line.startsWith('Gyro WHO_AM_I')) {
@@ -461,7 +475,34 @@ class SerialStore {
       const nums = parts.map((p) => Number(p));
       if (nums.some((n) => Number.isNaN(n))) return;
       const [ax, ay, az, gx, gy, gz] = nums;
-      this.applySample(ax, ay, az, gx, gy, gz, 0, 0, 0, 0, 0, 0, 0);
+      this.applySample(ax, ay, az, gx, gy, gz, 0, 0, 0, 0, 0, 0, NaN, NaN, NaN, NaN, 0);
+      return;
+    }
+    if (parts.length === 18) {
+      // Formato v1.1: 12 floats originales + magX/Y/Z + tempC + tsMs + CRC.
+      const crcStr = parts[17];
+      const payload = parts.slice(0, 17).join(';');
+      const crcExpected = crc16Ccitt(payload);
+      const crcReceived = parseInt(crcStr, 16);
+      if (!Number.isFinite(crcReceived) || crcReceived !== crcExpected) {
+        this.crcErrors++;
+        return;
+      }
+      const f = (i: number) => Number(parts[i]);
+      const ax = f(0), ay = f(1), az = f(2);
+      const gx = f(3), gy = f(4), gz = f(5);
+      const aax = f(6), aay = f(7), aaz = f(8);
+      const lax = f(9), lay = f(10), laz = f(11);
+      const mx = f(12), my = f(13), mz = f(14);
+      const tempC = f(15);
+      const ts = f(16);
+      // Mag/temp pueden ser NaN deliberadamente; chequear solo los obligatorios.
+      if ([ax, ay, az, gx, gy, gz, aax, aay, aaz, lax, lay, laz, ts].some(Number.isNaN)) return;
+      if (this.firmwareVersion !== 'extended') {
+        this.firmwareVersion = 'extended';
+        console.info('[serial] firmware v1.1 detectado (18 campos con mag+temp)');
+      }
+      this.applySample(ax, ay, az, gx, gy, gz, aax, aay, aaz, lax, lay, laz, mx, my, mz, tempC, ts);
       return;
     }
     if (parts.length === 14) {
@@ -482,9 +523,9 @@ class SerialStore {
       if ([ax, ay, az, gx, gy, gz, aax, aay, aaz, lax, lay, laz, ts].some(Number.isNaN)) return;
       if (this.firmwareVersion !== 'extended') {
         this.firmwareVersion = 'extended';
-        console.info('[serial] firmware extendido detectado (14 campos + CRC)');
+        console.info('[serial] firmware v1.0 detectado (14 campos)');
       }
-      this.applySample(ax, ay, az, gx, gy, gz, aax, aay, aaz, lax, lay, laz, ts);
+      this.applySample(ax, ay, az, gx, gy, gz, aax, aay, aaz, lax, lay, laz, NaN, NaN, NaN, NaN, ts);
       return;
     }
     // Recuento de campos no reconocido: ignorar con warn rate-limited.
@@ -502,6 +543,8 @@ class SerialStore {
     gx: number, gy: number, gz: number,
     aax: number, aay: number, aaz: number,
     lax: number, lay: number, laz: number,
+    mx: number, my: number, mz: number,
+    tempC: number,
     ts: number,
   ) {
     this.angle = { x: ax, y: ay, z: az };
@@ -515,7 +558,7 @@ class SerialStore {
     // Notificar a sumideros de captura. Wrapping en try para que una captura
     // que falle no rompa el stream principal del simulador.
     if (this.captureSinks.length > 0) {
-      const raw: RawSample = { ax, ay, az, gx, gy, gz, aax, aay, aaz, lax, lay, laz, tsMs: ts };
+      const raw: RawSample = { ax, ay, az, gx, gy, gz, aax, aay, aaz, lax, lay, laz, mx, my, mz, tempC, tsMs: ts };
       for (const sink of this.captureSinks) {
         try { sink(raw); } catch (e) { console.warn('[serial] captureSink error', e); }
       }

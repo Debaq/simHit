@@ -6,6 +6,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { downloadDir } from '@tauri-apps/api/path';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { serial, type RawSample } from './serial.svelte';
 
 export type CaptureStage = 'idle' | 'preheat' | 'recording' | 'flushing' | 'done' | 'error';
@@ -93,7 +94,7 @@ class CaptureStore {
   private preheatTimer: ReturnType<typeof setInterval> | null = null;
   private recTimer: ReturnType<typeof setInterval> | null = null;
   private flushTimer: ReturnType<typeof setInterval> | null = null;
-  private progressTimer: ReturnType<typeof setInterval> | null = null;
+  private unlistenProgress: UnlistenFn | null = null;
 
   async start(cfg: StartConfig) {
     if (this.stage !== 'idle' && this.stage !== 'done' && this.stage !== 'error') {
@@ -150,7 +151,15 @@ class CaptureStore {
         void this.stop('complete');
       }
     }, 250);
-    this.progressTimer = setInterval(() => { void this.pollProgress(); }, 1000);
+    // Backend empuja capture://progress cada ~250 ms (en cada batch suficientemente
+    // espaciado). Reemplaza el polling antiguo y reduce IPC.
+    this.unlistenProgress = await listen<Progress>('capture://progress', (e) => {
+      const p = e.payload;
+      if (p.session_id !== this.sessionId) return;
+      this.samplesWritten = p.samples_written;
+      this.samplesLost = p.samples_lost;
+      this.bytesWritten = p.bytes_written;
+    });
   }
 
   // Detener manualmente. Si la captura llegó a término natural, llamar con
@@ -213,7 +222,7 @@ class CaptureStore {
     if (this.preheatTimer) { clearInterval(this.preheatTimer); this.preheatTimer = null; }
     if (this.recTimer) { clearInterval(this.recTimer); this.recTimer = null; }
     if (this.flushTimer) { clearInterval(this.flushTimer); this.flushTimer = null; }
-    if (this.progressTimer) { clearInterval(this.progressTimer); this.progressTimer = null; }
+    if (this.unlistenProgress) { this.unlistenProgress(); this.unlistenProgress = null; }
   }
 
   private runPreheat(seconds: number): Promise<void> {
@@ -242,12 +251,15 @@ class CaptureStore {
     if (tsUs <= this.lastTsUs) tsUs = this.lastTsUs + 1;
     this.lastTsUs = tsUs;
 
+    const finiteOrNull = (v: number) => (Number.isFinite(v) ? v : null);
     this.buffer.push({
       timestamp_us: tsUs,
       gyro_x_dps: s.gx, gyro_y_dps: s.gy, gyro_z_dps: s.gz,
       accel_x_g: s.lax / G, accel_y_g: s.lay / G, accel_z_g: s.laz / G,
-      mag_x_ut: null, mag_y_ut: null, mag_z_ut: null,
-      temp_c: null,
+      mag_x_ut: finiteOrNull(s.mx),
+      mag_y_ut: finiteOrNull(s.my),
+      mag_z_ut: finiteOrNull(s.mz),
+      temp_c: finiteOrNull(s.tempC),
     });
   }
 
@@ -268,15 +280,6 @@ class CaptureStore {
     }
   }
 
-  private async pollProgress() {
-    if (!this.sessionId) return;
-    try {
-      const p = await invoke<Progress>('get_capture_progress', { sessionId: this.sessionId });
-      this.samplesWritten = p.samples_written;
-      this.samplesLost = p.samples_lost;
-      this.bytesWritten = p.bytes_written;
-    } catch { /* ignore: la captura puede haber terminado entre tick y tick */ }
-  }
 }
 
 export const capture = new CaptureStore();

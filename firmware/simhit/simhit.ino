@@ -3,15 +3,18 @@
 // Fusión: Madgwick (Adafruit_AHRS) → yaw/pitch/roll
 //
 // Protocolo serial:
-//   Salida (formato extendido):
-//     "angX;angY;angZ;gyroX;gyroY;gyroZ;angAccX;angAccY;angAccZ;linAccX;linAccY;linAccZ;tsMs;crc\n"
+//   Salida (formato v1.1, 18 campos):
+//     "angX;angY;angZ;gyroX;gyroY;gyroZ;angAccX;angAccY;angAccZ;linAccX;linAccY;linAccZ;magX;magY;magZ;tempC;tsMs;crc\n"
 //     - 12 floats: pose (°), velocidad angular (°/s), aceleración angular (°/s²),
-//       aceleración lineal del LSM303 (m/s²).
+//       aceleración lineal (m/s²).
+//     - 4 floats nuevos en v1.1: magX/Y/Z (µT, NaN si el sensor no tiene mag),
+//       tempC (°C del chip giroscopio, NaN si no soportado).
 //     - tsMs: uint32 en ms desde boot (millis()).
 //     - crc: CRC-16 CCITT 0x1021 (init 0xFFFF) hexadecimal, calculado sobre
 //       todo el payload hasta el ';' anterior (sin incluir el ';crc\n' final).
-//   Salida legacy: cuando el firmware previo emitía sólo 6 floats. Cliente
-//   parser tolera ambos formatos.
+//   Salida v1.0 (14 campos): sin magX/Y/Z/tempC; el parser cliente la acepta
+//   para compatibilidad con firmwares previos.
+//   Salida legacy: 6 floats (firmware antiguo). Cliente tolera los 3 formatos.
 //
 //   Entrada: "IMU ON" | "IMU OFF" | "IMU CAL" | "IMU CLR" | "IMU STATUS"
 //            "MAG CAL" | "MAG CLR" | "MAG STATUS"
@@ -28,13 +31,14 @@
 #include <Adafruit_LSM303_Accel.h>
 #include <Adafruit_LSM303DLH_Mag.h>
 #include <Adafruit_AHRS.h>
+#include <esp_mac.h>
 
 #define SERIAL_BAUD_RATE 460800
 
 // Versión del firmware. Sincronizar con firmware/manifest.json cada vez que se
 // haga un release. El cliente la usa para chequear actualizaciones contra el
 // manifest del repo.
-#define FW_VERSION_STRING "1.0.0"
+#define FW_VERSION_STRING "1.1.0"
 
 // ──────────────────── Selección del driver de sensor ────────────────────
 // La CI pasa -DSENSOR_DRIVER=<MACRO> al compilador para producir un .bin por
@@ -229,6 +233,12 @@ float linAccX = 0.0f, linAccY = 0.0f, linAccZ = 0.0f;
 // Última velocidad angular (°/s post-bias) usada por la derivada y emitida
 // por emitIMU(). Coherente con la entrada de computeAngularAccel().
 float lastGyroDpsX = 0.0f, lastGyroDpsY = 0.0f, lastGyroDpsZ = 0.0f;
+
+// Magnetómetro (µT) y temperatura del chip (°C) capturados en sampleAndFuse()
+// y emitidos por emitIMU() (formato v1.1). NaN si el sensor no los provee;
+// snprintf("%.2f", NAN) → "nan" — el cliente serial los acepta como NaN en CSV.
+float lastMagX = 0.0f / 0.0f, lastMagY = 0.0f / 0.0f, lastMagZ = 0.0f / 0.0f;
+float lastTempC = 0.0f / 0.0f;
 
 static inline float radToDeg(float r) { return r * 57.2957795f; }
 
@@ -589,6 +599,17 @@ void setup() {
   // y lo compara contra firmware/manifest.json para detectar actualizaciones.
   Serial.print("SimHit FW ");
   Serial.println(FW_VERSION_STRING);
+  // MAC del ESP32 (chip-id). El cliente lo captura como serial.espMacAddress y
+  // lo incluye en sensor_profile.json para trazabilidad device-perfil.
+  {
+    uint8_t mac[6];
+    if (esp_efuse_mac_get_default(mac) == ESP_OK) {
+      char buf[24];
+      snprintf(buf, sizeof(buf), "SimHit MAC %02X:%02X:%02X:%02X:%02X:%02X",
+               mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+      Serial.println(buf);
+    }
+  }
 
   pinMode(LASER_PIN, OUTPUT);
   digitalWrite(LASER_PIN, LOW);
@@ -702,6 +723,10 @@ void sampleAndFuse() {
   computeAngularAccel(gx_dps, gy_dps, gz_dps, 1.0f / SAMPLE_RATE_HZ);
   lastGyroDpsX = gx_dps; lastGyroDpsY = gy_dps; lastGyroDpsZ = gz_dps;
   linAccX = ae.acceleration.x; linAccY = ae.acceleration.y; linAccZ = ae.acceleration.z;
+  // Mag crudo (sin calibración hard/soft-iron) para que el CSV preserve los
+  // datos sin pérdida. La fusión usa los calibrados por separado.
+  lastMagX = me.magnetic.x; lastMagY = me.magnetic.y; lastMagZ = me.magnetic.z;
+  lastTempC = 0.0f / 0.0f;  // LSM303 no expone temperatura por API Adafruit
 
   float mx = (me.magnetic.x - mx_off) * mx_scl;
   float my = (me.magnetic.y - my_off) * my_scl;
@@ -720,6 +745,8 @@ void sampleAndFuse() {
   computeAngularAccel(gx_dps, gy_dps, gz_dps, 1.0f / SAMPLE_RATE_HZ);
   lastGyroDpsX = gx_dps; lastGyroDpsY = gy_dps; lastGyroDpsZ = gz_dps;
   linAccX = ax; linAccY = ay; linAccZ = az;
+  lastMagX = lastMagY = lastMagZ = 0.0f / 0.0f;  // ICM-42688 no tiene mag
+  lastTempC = 0.0f / 0.0f;
   filter.updateIMU(gx_dps, gy_dps, gz_dps, ax, ay, az);
 
 #elif SENSOR_DRIVER == MPU9250
@@ -731,6 +758,8 @@ void sampleAndFuse() {
   computeAngularAccel(gx_dps, gy_dps, gz_dps, 1.0f / SAMPLE_RATE_HZ);
   lastGyroDpsX = gx_dps; lastGyroDpsY = gy_dps; lastGyroDpsZ = gz_dps;
   linAccX = ax; linAccY = ay; linAccZ = az;
+  lastMagX = mx; lastMagY = my; lastMagZ = mz;  // AK8963 raw (µT)
+  lastTempC = 0.0f / 0.0f;
   // Magnetómetro disponible: usar fusión 9-DOF si la calibración del MAG está hecha.
   float mxc = (mx - mx_off) * mx_scl;
   float myc = (my - my_off) * my_scl;
@@ -750,6 +779,10 @@ void sampleAndFuse() {
   computeAngularAccel(gx_dps, gy_dps, gz_dps, 1.0f / SAMPLE_RATE_HZ);
   lastGyroDpsX = gx_dps; lastGyroDpsY = gy_dps; lastGyroDpsZ = gz_dps;
   linAccX = ax; linAccY = ay; linAccZ = az;
+  // El BNO055 tiene mag interno y la fusión ya lo usa; aún no lo exponemos
+  // crudo para evitar lecturas I2C extra. Pendiente si se necesita en el CSV.
+  lastMagX = lastMagY = lastMagZ = 0.0f / 0.0f;
+  lastTempC = 0.0f / 0.0f;
   // El BNO055 reporta heading [0,360); convertimos a [-180,180] para mantener
   // la convención de Madgwick del resto del firmware.
   if (yaw_d > 180.0f) yaw_d -= 360.0f;
@@ -789,16 +822,18 @@ void emitIMU() {
   uint32_t now_ms = millis();
 
   // Armar payload completo (sin CRC) en un buffer para calcular CRC-16 sobre
-  // el mismo bytestream que el cliente verá. snprintf con %.2f mantiene la
-  // precisión histórica (2 decimales). Tamaño de buffer holgado para 12
-  // floats + ts: 160 bytes es seguro (~12·12 + 12 + márgenes).
-  char line[160];
+  // el mismo bytestream que el cliente verá. Formato v1.1 (18 campos): se
+  // agregaron magX/Y/Z (µT) y tempC (°C) antes del timestamp. NaN cuando el
+  // sensor no los provee; snprintf("%.2f", NAN) imprime "nan" y el cliente
+  // lo acepta como Number.NaN al parsear.
+  char line[224];
   int n = snprintf(line, sizeof(line),
-    "%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%lu",
+    "%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%.2f;%lu",
     adjustedAngleX, adjustedAngleY, adjustedAngleZ,
     gx_dps, gy_dps, gz_dps,
     angAccX, angAccY, angAccZ,
     linAccX, linAccY, linAccZ,
+    lastMagX, lastMagY, lastMagZ, lastTempC,
     (unsigned long)now_ms);
   if (n < 0 || n >= (int)sizeof(line)) {
     // Truncamiento improbable: descartar la línea para no enviar CRC mal calculado.

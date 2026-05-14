@@ -30,6 +30,7 @@ pub fn run() {
             metrics::flash::detect_esp_chip,
             metrics::flash::flash_firmware,
             metrics::flash::list_serial_ports,
+            metrics::platform::get_host_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
