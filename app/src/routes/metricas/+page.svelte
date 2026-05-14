@@ -1,5 +1,6 @@
 <script lang="ts">
   import TopBar from '$lib/components/TopBar.svelte';
+  import AxesWizard from '$lib/components/AxesWizard.svelte';
   import { serial } from '$lib/serial.svelte';
   import { capture } from '$lib/capture.svelte';
   import { analysis } from '$lib/analysis.svelte';
@@ -18,6 +19,8 @@
 
   type Step = 'flash' | 'detect' | 'capture' | 'analysis' | 'profile';
   let step = $state<Step>('flash');
+  // Wizard de mapeo de ejes — disponible desde el paso 2 (sensor detectado).
+  let axesWizardOpen = $state(false);
 
   // 1) Firmware — chequeo de versión y actualizaciones. El flasheo real
   // (espflash + .bin embebido o descargado) es el último componente del
@@ -813,6 +816,16 @@
                     <dt>Calibración</dt><dd style="color:var(--text-muted)">Pendiente</dd>
                   {/if}
                 </dl>
+                <div class="axes-wizard-row">
+                  <button class="block" onclick={() => (axesWizardOpen = true)} disabled={!serial.connected}>
+                    🧭 Configurar mapeo de ejes…
+                  </button>
+                  {#if serial.axesFromFirmware}
+                    <span class="muted small">✓ Persistido en NVS del firmware</span>
+                  {:else if serial.firmwareVersionString}
+                    <span class="muted small">Mapeo en localStorage (firmware viejo o no configurado)</span>
+                  {/if}
+                </div>
                 <button class="primary block" onclick={() => (step = 'capture')}>
                   Continuar a captura →
                 </button>
@@ -1435,7 +1448,19 @@
   </main>
 </div>
 
+<AxesWizard open={axesWizardOpen} onClose={() => (axesWizardOpen = false)} />
+
 <style>
+  .axes-wizard-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 8px 0;
+    flex-wrap: wrap;
+  }
+  .axes-wizard-row .muted { color: var(--text-muted); }
+  .axes-wizard-row .small { font-size: 12px; }
+
   .app {
     min-height: 100vh;
     display: flex;

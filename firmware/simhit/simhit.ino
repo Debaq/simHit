@@ -21,7 +21,15 @@
 //            "MAG CAL" | "MAG CLR" | "MAG STATUS"
 //            "LASER ON" | "LASER OFF" | "LASER STATUS"
 //            "FILTER SG" | "FILTER IIR" | "FILTER NONE" | "FILTER STATUS"
+//            "AXES GET" | "AXES SET <12 chars>" | "AXES RESET"
 //            "HELLO" | "VERSION" | "SENSOR" | "RESET"
+//
+//   El comando AXES configura el mapeo de ejes del sensor a los DOF de cabeza
+//   (yaw/pitch/roll del paciente). Persistido en NVS clave "axes". El cliente
+//   lo determina con el wizard de ejes y lo escribe via "AXES SET".
+//   Formato compacto de 12 chars: 6 pares (axis,sign) en orden
+//   pose.yaw pose.pitch pose.roll gyro.yaw gyro.pitch gyro.roll.
+//   Ej: "x+y+z+z+x+y+" = identidad pose, gyro yaw=Z+ pitch=X+ roll=Y+.
 //
 //   El comando FILTER selecciona el método de cálculo de la aceleración
 //   angular y se persiste en NVS (clave "accelFilt"). Default: SG.
@@ -39,7 +47,7 @@
 // Versión del firmware. Sincronizar con firmware/manifest.json cada vez que se
 // haga un release. El cliente la usa para chequear actualizaciones contra el
 // manifest del repo.
-#define FW_VERSION_STRING "1.3.1"
+#define FW_VERSION_STRING "1.4.0"
 
 // ──────────────────── Selección del driver de sensor ────────────────────
 // La CI pasa -DSENSOR_DRIVER=<MACRO> al compilador para producir un .bin por
@@ -542,6 +550,92 @@ void loadAccelFilter() {
   prefs.end();
   if (v <= (uint8_t)ACCEL_FILT_NONE) accelFilter = (AccelFilter)v;
   else accelFilter = ACCEL_FILT_SG;
+}
+
+// ──────────────────── Mapeo de ejes (AXES) ────────────────────
+// Mapea cada DOF del paciente (yaw/pitch/roll) a un eje del sensor (x/y/z)
+// con un signo. El firmware no aplica el mapeo a las muestras (sigue
+// emitiendo angX/Y/Z y gyroX/Y/Z del sensor crudo); el cliente lo aplica al
+// renderizar. Lo persistimos acá para que un equipo SimHIT pueda compartirse
+// entre PCs sin perder la configuración del wizard.
+struct AxisMapFW { uint8_t axis; int8_t sign; };  // axis 0=x,1=y,2=z; sign ±1
+struct AxesConfigFW {
+  AxisMapFW pose_yaw, pose_pitch, pose_roll;
+  AxisMapFW gyro_yaw, gyro_pitch, gyro_roll;
+};
+static const AxesConfigFW AXES_DEFAULT = {
+  {0, 1}, {1, 1}, {2, 1},     // pose: identidad
+  {2, 1}, {0, 1}, {1, 1}      // gyro: yaw=Z, pitch=X, roll=Y
+};
+AxesConfigFW axesConfig = AXES_DEFAULT;
+static const char AXIS_NAME[3] = {'x', 'y', 'z'};
+
+bool parseAxes12(const String& s, AxesConfigFW* out) {
+  if (s.length() != 12) return false;
+  AxisMapFW m[6];
+  for (int i = 0; i < 6; i++) {
+    char c = s.charAt(2*i);
+    if (c == 'x' || c == 'X') m[i].axis = 0;
+    else if (c == 'y' || c == 'Y') m[i].axis = 1;
+    else if (c == 'z' || c == 'Z') m[i].axis = 2;
+    else return false;
+    char sg = s.charAt(2*i + 1);
+    if (sg == '+') m[i].sign = 1;
+    else if (sg == '-') m[i].sign = -1;
+    else return false;
+  }
+  out->pose_yaw   = m[0]; out->pose_pitch = m[1]; out->pose_roll = m[2];
+  out->gyro_yaw   = m[3]; out->gyro_pitch = m[4]; out->gyro_roll = m[5];
+  return true;
+}
+
+void printAxisJson(const char* label, const AxisMapFW& m, bool trailingComma) {
+  Serial.print("\""); Serial.print(label);
+  Serial.print("\":{\"axis\":\""); Serial.print(AXIS_NAME[m.axis]);
+  Serial.print("\",\"sign\":"); Serial.print((int)m.sign);
+  Serial.print("}"); if (trailingComma) Serial.print(",");
+}
+
+void printAxesJson() {
+  Serial.print("AXES JSON {\"pose\":{");
+  printAxisJson("yaw",   axesConfig.pose_yaw,   true);
+  printAxisJson("pitch", axesConfig.pose_pitch, true);
+  printAxisJson("roll",  axesConfig.pose_roll,  false);
+  Serial.print("},\"gyro\":{");
+  printAxisJson("yaw",   axesConfig.gyro_yaw,   true);
+  printAxisJson("pitch", axesConfig.gyro_pitch, true);
+  printAxisJson("roll",  axesConfig.gyro_roll,  false);
+  Serial.println("}}");
+}
+
+void saveAxes() {
+  prefs.begin("simhit", false);
+  prefs.putBytes("axes", &axesConfig, sizeof(axesConfig));
+  prefs.end();
+}
+
+void loadAxes() {
+  prefs.begin("simhit", true);
+  size_t got = prefs.getBytesLength("axes");
+  if (got == sizeof(axesConfig)) {
+    prefs.getBytes("axes", &axesConfig, sizeof(axesConfig));
+    // Validar campos: axis ∈ {0,1,2}, sign ∈ {-1,+1}. Si está corrupto, default.
+    AxisMapFW* arr = (AxisMapFW*)&axesConfig;
+    for (int i = 0; i < 6; i++) {
+      if (arr[i].axis > 2 || (arr[i].sign != 1 && arr[i].sign != -1)) {
+        axesConfig = AXES_DEFAULT;
+        break;
+      }
+    }
+  } else {
+    axesConfig = AXES_DEFAULT;
+  }
+  prefs.end();
+}
+
+void resetAxes() {
+  axesConfig = AXES_DEFAULT;
+  saveAxes();
 }
 
 // Lee 1 byte de un registro por I2C. Retorna -1 en error.
@@ -1283,6 +1377,11 @@ void setup() {
   Serial.print("Accel filter = ");
   Serial.println(accelFilterName(accelFilter));
 
+  // Mapeo de ejes persistido — el cliente lo lee del banner para evitar un
+  // round-trip con "AXES GET" al conectar.
+  loadAxes();
+  printAxesJson();
+
   lastSampleUs = micros();
   Serial.println("SimHit start");
 }
@@ -1528,6 +1627,22 @@ void handleCommand(String command) {
   } else if (command == "FILTER STATUS") {
     Serial.print("FILTER STATUS ");
     Serial.println(accelFilterName(accelFilter));
+  } else if (command == "AXES GET") {
+    printAxesJson();
+  } else if (command.startsWith("AXES SET ")) {
+    String payload = command.substring(9);
+    payload.trim();
+    AxesConfigFW parsed;
+    if (parseAxes12(payload, &parsed)) {
+      axesConfig = parsed;
+      saveAxes();
+      printAxesJson();
+    } else {
+      Serial.println("AXES SET fail invalid_format");
+    }
+  } else if (command == "AXES RESET") {
+    resetAxes();
+    printAxesJson();
   } else if (command == "HELLO") {
     Serial.println("HELLO");
   } else if (command == "VERSION") {

@@ -125,6 +125,44 @@ function loadAxes(): AxesConfig {
   }
 }
 
+// Serializa AxesConfig al formato compacto de 12 chars que entiende el
+// firmware (cmd "AXES SET"). Orden: pose.yaw, pose.pitch, pose.roll,
+// gyro.yaw, gyro.pitch, gyro.roll. Cada par es <axis><sign> ej. "x+".
+export function serializeAxes12(c: AxesConfig): string {
+  const enc = (m: AxisMap) => m.axis + (m.sign === 1 ? '+' : '-');
+  return enc(c.pose.yaw) + enc(c.pose.pitch) + enc(c.pose.roll)
+       + enc(c.gyro.yaw) + enc(c.gyro.pitch) + enc(c.gyro.roll);
+}
+
+// Parsea el JSON emitido por el firmware ≥ 1.4.0 en respuesta a AXES GET y en
+// boot ("AXES JSON {...}"). Retorna null si la estructura es inválida.
+function parseAxesJsonPayload(jsonStr: string): AxesConfig | null {
+  try {
+    const obj = JSON.parse(jsonStr);
+    const validAxis = (a: unknown): a is Axis => a === 'x' || a === 'y' || a === 'z';
+    const validSign = (s: unknown): s is 1 | -1 => s === 1 || s === -1;
+    const parseMap = (m: unknown): AxisMap | null => {
+      if (!m || typeof m !== 'object') return null;
+      const o = m as { axis?: unknown; sign?: unknown };
+      if (!validAxis(o.axis) || !validSign(o.sign)) return null;
+      return { axis: o.axis, sign: o.sign };
+    };
+    const parseTriple = (t: unknown) => {
+      if (!t || typeof t !== 'object') return null;
+      const o = t as Record<string, unknown>;
+      const yaw = parseMap(o.yaw), pitch = parseMap(o.pitch), roll = parseMap(o.roll);
+      if (!yaw || !pitch || !roll) return null;
+      return { yaw, pitch, roll };
+    };
+    const pose = parseTriple(obj.pose);
+    const gyro = parseTriple(obj.gyro);
+    if (!pose || !gyro) return null;
+    return { pose, gyro };
+  } catch {
+    return null;
+  }
+}
+
 class SerialStore {
   connected = $state(false);
   connecting = $state(false);
@@ -195,6 +233,9 @@ class SerialStore {
   private captureSinks: Array<(s: RawSample) => void> = [];
   // mapeo configurable de ejes
   axes = $state<AxesConfig>(loadAxes());
+  // True después de recibir un "AXES JSON" del firmware ≥ 1.4.0. La UI lo usa
+  // para indicar que el mapeo está persistido en NVS y se comparte entre PCs.
+  axesFromFirmware = $state(false);
 
   private sp: SerialPort | null = null;
   private buffer = '';
@@ -223,6 +264,24 @@ class SerialStore {
 
   resetAxes() {
     this.setAxes(structuredClone(DEFAULT_AXES));
+  }
+
+  // Persiste el mapeo en el NVS del firmware (≥ 1.4.0). Actualiza también el
+  // estado local cuando el firmware confirma (vía "AXES JSON" en respuesta).
+  // En firmwares viejos el comando se ignora silenciosamente: caemos a
+  // localStorage como antes.
+  async writeAxesToFirmware(next: AxesConfig) {
+    this.setAxes(next);
+    if (!this.sp) return;
+    await this.sendCommand(`AXES SET ${serializeAxes12(next)}`);
+  }
+
+  async resetAxesOnFirmware() {
+    if (!this.sp) {
+      this.resetAxes();
+      return;
+    }
+    await this.sendCommand('AXES RESET');
   }
 
   async listPorts() {
@@ -364,6 +423,7 @@ class SerialStore {
     this.detectedSensor = null;
     this.firmwareVersionString = null;
     this.espMacAddress = null;
+    this.axesFromFirmware = false;
     try {
       this.sp = new SerialPort({ path, baudRate: FIRMWARE_BAUD });
       await this.sp.open();
@@ -417,6 +477,7 @@ class SerialStore {
     this.detectedSensor = null;
     this.firmwareVersionString = null;
     this.espMacAddress = null;
+    this.axesFromFirmware = false;
     this.imuCal = null;
     this.imuCalFailure = null;
     this.currentTempC = NaN;
@@ -465,6 +526,23 @@ class SerialStore {
     }
     if (line.startsWith('IMU STATUS JSON ')) {
       this.parseImuCalJson(line.slice('IMU STATUS JSON '.length), true);
+      return;
+    }
+    // Mapeo de ejes persistido por el firmware (≥ 1.4.0). Llega al boot tras
+    // el banner MAC y también como respuesta a "AXES GET" o "AXES SET".
+    // Sincroniza el estado del cliente: el firmware es la fuente de verdad si
+    // el equipo SimHIT se compartió entre PCs.
+    if (line.startsWith('AXES JSON ')) {
+      const parsed = parseAxesJsonPayload(line.slice('AXES JSON '.length));
+      if (parsed) {
+        this.axes = parsed;
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed)); } catch { /* ignore */ }
+        this.axesFromFirmware = true;
+      }
+      return;
+    }
+    if (line.startsWith('AXES SET fail')) {
+      this.lastError = line;
       return;
     }
 
