@@ -53,42 +53,46 @@ Si el usuario quiere experimentar (p.ej. para Allan variance fina a τ chico nec
 
 ---
 
-## 2. Detección de sensores piratas / clones
+## 2. Detección de hardware roto / inutilizable
 
 ### Problema
 
-Los módulos chinos baratos a veces:
+No nos importa si el sensor es genuino, clon o pirata. Nos importa **si funciona bien para vHIT**. Un clon que se comporta dentro de spec es perfectamente válido. Un chip "genuino" dañado o ruidoso, no.
 
-- Llevan stickers que mienten (MPU-6050 vendido como MPU-9250).
-- Falsifican WHO_AM_I (devuelven el ID esperado pero el chip interno es distinto).
-- Tienen el silicio dañado y reportan datos con ruido fuera de spec.
-- Vienen con bias gigante imposible de calibrar.
-- ADXL345B (chinos) tienen ruido 5× peor que el original.
-- HMC5883L que en realidad es QMC5883L (mismo módulo HW-579).
+Síntomas que sí rompen el examen y queremos detectar:
 
-Si entras al paper sin detectar esto, los resultados son irreproducibles.
+- Accel saturado, muerto o con eje invertido (gravedad fuera de rango).
+- Cable malo / soldadura fría → lecturas erráticas.
+- Silicio dañado con ruido muy por encima del umbral usable de vHIT.
+- Bias gigante incalibrable (offset enorme que no se va con el zero).
+- Ejes podridos o cross-talk severo entre gyros.
 
-### Diseño propuesto — suite de validación de hardware
+El veredicto es **usable / marginal / roto**, no genuino / pirata.
 
-Una nueva tarjeta **"Validación de hardware"** en paso 2 que corre 5 pruebas y emite veredicto pass/marginal/fail por cada una. El usuario presiona "Ejecutar validación" con el sensor inmóvil sobre una superficie estable durante 30 segundos.
+### Diseño propuesto — suite de validación funcional
+
+Una nueva tarjeta **"Validación funcional"** en paso 2 que corre las pruebas y emite veredicto por cada una. El usuario presiona "Ejecutar validación" con el sensor inmóvil sobre una superficie estable durante 30 segundos.
 
 | # | Test | Qué mide | Pass criterion |
 |---|---|---|---|
-| **1** | WHO_AM_I | Identificación básica (ya se hace) | Valor esperado del driver activo |
-| **2** | Self-test del MEMS | Aplica fuerza electrostática al gyro/accel y verifica respuesta. Distingue chip real de emulación. Cada chip tiene su rutina (BST_RES en ICM, ST_GYRO/ACCEL en MPU). | Respuesta dentro del rango datasheet (±5-30%) |
-| **3** | Gravedad estática | Con sensor quieto en superficie plana, ‖a‖ debería ser 9.80 ± 0.20 m/s². Detecta saturación del accel, eje invertido, o cable malo. | 9.60 ≤ ‖a‖ ≤ 10.00 m/s² |
-| **4** | Noise floor del gyro (10 s) | Captura corta con sensor estático, computa ARW e BI por eje. Compara contra datasheet (`SENSOR_REFERENCES`). | ARW < 2× datasheet, BI < 3× datasheet |
-| **5** | Cross-axis isolation | Pide al usuario rotar solo en yaw 90°. Integra gyro X/Y/Z. Yaw debería integrar a ~90°, otros ≤ 5°. Detecta ejes mal alineados o cross-talk severo. | yaw ∈ [80°, 100°], otros < 5° |
+| **1** | Gravedad estática | Con sensor quieto en superficie plana, ‖a‖ debería ser 9.80 ± 0.20 m/s². Detecta saturación del accel, eje invertido, o cable malo. | 9.60 ≤ ‖a‖ ≤ 10.00 m/s² |
+| **2** | Noise floor del gyro (10 s) | Captura corta con sensor estático, computa ARW y BI por eje. Compara contra **umbral absoluto de usabilidad vHIT** (no contra datasheet del chip). | ARW < umbral_vhit, BI < umbral_vhit |
+| **3** | Bias estático del gyro (10 s) | Media de ‖ω‖ con sensor quieto. Detecta offset incalibrable. | ‖media(ω)‖ < umbral_bias (configurable) |
+| **4** | Cross-axis isolation | Pide al usuario rotar solo en yaw 90°. Integra gyro X/Y/Z. Yaw debería integrar a ~90°, otros ≤ 5°. Detecta ejes podridos o cross-talk severo. | yaw ∈ [80°, 100°], otros < 5° |
 
-Las primeras 4 son automáticas (no requieren input del usuario). La 5 requiere guía interactiva.
+WHO_AM_I se mantiene en el flujo de boot (para elegir driver) pero **no es gate de autenticidad** — clon que reporta ID correcto y anda bien = pass.
 
-Reporte estructurado `HW VALIDATION JSON {...}` que el cliente parsea y muestra como tabla con badges. Persistir en `sensor_profile.json` para auditoría.
+Tests 1-3 son automáticas (no requieren input del usuario). El 4 requiere guía interactiva.
+
+Reporte estructurado `HW VALIDATION JSON {...}` que el cliente parsea y muestra como tabla con badges (`usable` / `marginal` / `roto`). Persistir en `sensor_profile.json` para auditoría.
+
+Los umbrales `umbral_vhit`, `umbral_bias` viven en una tabla del cliente y se pueden tunear sin reflashear. Default conservador derivado de los datasheets de los sensores ya soportados.
 
 ### Esfuerzo estimado
 
-- Firmware: ~250 líneas. Self-test register sequences por driver, helpers de integración, comando `VALIDATE`.
-- Cliente: ~150 líneas. UI con paso interactivo para test 5, parsing del reporte, tabla con badges.
-- Tests Rust: si las pruebas 4-5 producen métricas, agregar fixture CSVs.
+- Firmware: ~150 líneas. Helpers de integración, medias estáticas, comando `VALIDATE`.
+- Cliente: ~150 líneas. UI con paso interactivo para test 4, parsing del reporte, tabla con badges, tabla de umbrales editable.
+- Tests Rust: si las pruebas 2-4 producen métricas, agregar fixture CSVs.
 
 ---
 
@@ -144,14 +148,14 @@ Resultado: `AxesConfig` completo auto-determinado. Mostramos visualización 3D d
 ## Orden de implementación recomendado
 
 1. **(3) Wizard de ejes primero** — desbloquea uso real con sensores nuevos. Es la fricción más alta hoy.
-2. **(2) Suite de validación de hardware** — antes de empezar a creer en los datos, validamos que el silicio es real.
+2. **(2) Suite de validación funcional** — antes de creer en los datos, validamos que el hardware funciona dentro de los umbrales de vHIT.
 3. **(1) Configuración pesada** — ya con (1) y (2) atados, podemos jugar con parámetros sin perder la coherencia del setup.
 
 ## Dependencias entre los tres
 
 - (1) y (3) requieren ambos extender el `BOOT JSON` o agregar comandos `CONFIG GET`/`AXES GET` para sincronizar estado entre firmware y cliente.
 - (2) test 4 (noise floor) reusa la infraestructura del Allan corto in-situ que ya tenemos en `allan-inplace.svelte.ts`.
-- (2) test 5 (cross-axis) requiere el mapeo de ejes ya configurado — por eso (3) va antes.
+- (2) test 4 (cross-axis) requiere el mapeo de ejes ya configurado — por eso (3) va antes.
 
 ## Bump de firmware al cerrar todo
 
@@ -165,12 +169,12 @@ Cada uno suma un campo en `IMU STATUS JSON` y unos comandos:
 
 ## Total estimado
 
-- ~480 líneas de firmware + tests
+- ~380 líneas de firmware + tests
 - ~550 líneas de frontend
 - ~3 sesiones de trabajo (una por área) si vamos limpio
 
 ## Riesgos
 
-- Self-test de cada chip tiene quirks distintos; la implementación está bien documentada en cada datasheet pero requiere bench testing.
+- Umbrales de usabilidad vHIT (ARW, BI, bias) no están publicados en literatura — requieren bench testing con sensores conocidos buenos para calibrar la tabla default.
 - Wizard 3D: si usamos threlte/three.js suma dep grande al bundle. Alternativa: SVG isométrico simple, más liviano y suficiente para visualizar el frame.
-- Sensores piratas que pasan WHO_AM_I y self-test pero fallan noise floor — el reporte debe ser graduado (no boolean), porque la línea de qué es "malo" es subjetiva.
+- Veredicto graduado (usable / marginal / roto), no boolean — la línea entre "marginal" y "roto" es subjetiva y depende del paciente/protocolo. Mostrar números crudos junto al badge para que el usuario decida.
