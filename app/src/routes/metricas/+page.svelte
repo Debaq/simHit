@@ -427,7 +427,7 @@
                   <dt>Errores CRC</dt><dd>{serial.crcErrors}</dd>
                 </dl>
                 <button class="block" onclick={() => serial.sendCommand('VERSION')} title="Consultar versión al firmware">
-                  ↻ Re-consultar VERSION
+                  ↻ Revisar versión
                 </button>
               </div>
             {:else}
@@ -435,7 +435,7 @@
                 <div class="empty-ic">📡</div>
                 <div class="empty-t">Sin versión recibida</div>
                 <p class="empty-d">El firmware actual puede ser anterior a v1.0.0 (no emite banner). Use VERSION para consultar:</p>
-                <button class="primary" onclick={() => serial.sendCommand('VERSION')}>Enviar VERSION</button>
+                <button class="primary" onclick={() => serial.sendCommand('VERSION')}>Revisar versión</button>
               </div>
             {/if}
           </div>
