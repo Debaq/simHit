@@ -349,18 +349,27 @@
     bias_instability_deg_hr: number;
     range_dps: number;
   };
+  // Indexado por slug del driver para coincidir con detectedSensor.slug y con
+  // los slugs del manifest. Valores típicos de datasheets para ARW y BI;
+  // permiten una comparación rápida de coherencia con el espec del chip.
   const SENSOR_REFERENCES: Record<string, SensorReference> = {
-    'ICM-42688': { label: 'ICM-42688-P', source: 'TDK InvenSense datasheet rev 1.6',
-                    arw_deg_sqrt_hr: 0.30, bias_instability_deg_hr: 24, range_dps: 2000 },
-    'BNO055':    { label: 'BNO055',       source: 'Bosch datasheet rev 1.4',
-                    arw_deg_sqrt_hr: 0.55, bias_instability_deg_hr: 40, range_dps: 2000 },
-    'MPU9250':   { label: 'MPU-9250',     source: 'InvenSense datasheet rev 1.1',
-                    arw_deg_sqrt_hr: 0.45, bias_instability_deg_hr: 35, range_dps: 2000 },
-    'L3GD20H':   { label: 'L3GD20H',      source: 'STMicro datasheet rev 2',
+    'l3g-lsm303': { label: 'L3GD20H + LSM303', source: 'STMicroelectronics L3GD20H DS9408 / LSM303DLHC DS6792',
                     arw_deg_sqrt_hr: 0.50, bias_instability_deg_hr: 50, range_dps: 2000 },
+    'icm-42688':  { label: 'ICM-42688-P',      source: 'TDK InvenSense datasheet rev 1.6',
+                    arw_deg_sqrt_hr: 0.30, bias_instability_deg_hr: 24, range_dps: 2000 },
+    'mpu9250':    { label: 'MPU-9250',         source: 'InvenSense datasheet rev 1.1',
+                    arw_deg_sqrt_hr: 0.45, bias_instability_deg_hr: 35, range_dps: 2000 },
+    'bno055':     { label: 'BNO055',           source: 'Bosch BNO055 datasheet rev 1.4',
+                    arw_deg_sqrt_hr: 0.55, bias_instability_deg_hr: 40, range_dps: 2000 },
+    'mpu6050':    { label: 'MPU-6050',         source: 'InvenSense MPU-6050 datasheet rev 3.4',
+                    arw_deg_sqrt_hr: 0.50, bias_instability_deg_hr: 60, range_dps: 2000 },
+    'itg-adxl-hmc': { label: 'ITG-3205 (HW-579)', source: 'InvenSense ITG-3205 datasheet rev 1.0',
+                    arw_deg_sqrt_hr: 0.85, bias_instability_deg_hr: 80, range_dps: 2000 },
+    'icm-20948':  { label: 'ICM-20948',        source: 'TDK InvenSense ICM-20948 datasheet rev 1.5',
+                    arw_deg_sqrt_hr: 0.40, bias_instability_deg_hr: 30, range_dps: 2000 },
   };
   let showReference = $state(false);
-  let referenceData = $derived(detectedSensor ? SENSOR_REFERENCES[detectedSensor.label] ?? null : null);
+  let referenceData = $derived(detectedSensor ? SENSOR_REFERENCES[detectedSensor.slug] ?? null : null);
 
   // Info del host (SO, arch, hostname, versión de app) — consultada una vez al
   // montar la vista. Se incluye en sensor_profile.json para trazabilidad.
@@ -1222,21 +1231,88 @@
         </div>
 
         {#if analysis.allan && analysis.sampling}
+          {@const a = analysis.allan}
+          {@const s = analysis.sampling}
+          {@const b = allanBounds}
+          {@const hist = s.histogram_dt_us}
+          {@const maxC = Math.max(...hist.map((bin) => bin[1]), 1)}
           <div class="card">
             <div class="card-h">Métricas medidas (resumen)</div>
             <div class="grid-2">
               <dl class="kv">
-                <dt>Frecuencia efectiva</dt><dd><b>{analysis.sampling.measured_hz.toFixed(2)} Hz</b></dd>
-                <dt>Δt σ (jitter)</dt><dd>{analysis.sampling.stdev_dt_us.toFixed(2)} µs</dd>
-                <dt>Muestras escritas</dt><dd>{analysis.sampling.n_samples.toLocaleString()}</dd>
-                <dt>Muestras perdidas</dt><dd>{analysis.sampling.samples_lost_estimate}</dd>
+                <dt>Frecuencia efectiva</dt><dd><b>{s.measured_hz.toFixed(2)} Hz</b></dd>
+                <dt>Declarada</dt><dd>{s.declared_hz.toFixed(1)} Hz</dd>
+                <dt>Δt medio</dt><dd>{s.mean_dt_us.toFixed(1)} µs</dd>
+                <dt>Δt σ (jitter)</dt><dd>{s.stdev_dt_us.toFixed(2)} µs</dd>
+                <dt>Δt p50 / p99 / máx</dt><dd>{s.p50_dt_us.toFixed(0)} / {s.p99_dt_us.toFixed(0)} / {s.max_dt_us.toFixed(0)} µs</dd>
+                <dt>Muestras escritas</dt><dd>{s.n_samples.toLocaleString()}</dd>
+                <dt>Muestras perdidas</dt><dd>{s.samples_lost_estimate}</dd>
+                <dt>Cumple criterio vHIT</dt><dd>{s.passes_vhit_criterion ? '✓ sí' : '✗ no'}</dd>
               </dl>
               <dl class="kv">
-                <dt>ARW máx (3 ejes)</dt><dd><b>{Math.max(...analysis.allan.arw_deg_sqrt_hr).toFixed(3)} °/√h</b></dd>
-                <dt>BI máx (3 ejes)</dt><dd>{Math.max(...analysis.allan.bias_instability_deg_hr).toFixed(1)} °/h</dd>
-                <dt>Duración análisis</dt><dd>{analysis.allan.duration_s.toFixed(1)} s</dd>
-                <dt>Fs análisis</dt><dd>{analysis.allan.sample_rate_hz.toFixed(2)} Hz</dd>
+                <dt>ARW X / Y / Z</dt><dd>{a.arw_deg_sqrt_hr.map((v) => v.toFixed(3)).join(' / ')} °/√h</dd>
+                <dt>ARW máx</dt><dd><b>{Math.max(...a.arw_deg_sqrt_hr).toFixed(3)} °/√h</b></dd>
+                <dt>BI X / Y / Z</dt><dd>{a.bias_instability_deg_hr.map((v) => v.toFixed(1)).join(' / ')} °/h</dd>
+                <dt>BI máx</dt><dd><b>{Math.max(...a.bias_instability_deg_hr).toFixed(1)} °/h</b></dd>
+                <dt>τ del mínimo</dt><dd>{a.tau_at_min_s.map((v) => v.toFixed(2)).join(' / ')} s</dd>
+                <dt>Duración análisis</dt><dd>{a.duration_s.toFixed(1)} s</dd>
+                <dt>Fs análisis</dt><dd>{a.sample_rate_hz.toFixed(2)} Hz</dd>
+                <dt>N muestras totales</dt><dd>{a.n_samples_total.toLocaleString()}</dd>
               </dl>
+            </div>
+
+            <!-- Curva Allan σ(τ) — log-log, 3 ejes — embebida en el bloque
+                 exportable para que html2pdf la capture en el PDF. -->
+            {#if b}
+              {@const eMinTau = Math.ceil(Math.log10(b.tauMin))}
+              {@const eMaxTau = Math.floor(Math.log10(b.tauMax))}
+              {@const eMinSig = Math.log10(b.sigMin)}
+              {@const eMaxSig = Math.log10(b.sigMax)}
+              <div style="margin-top:12px">
+                <div class="card-h" style="border-bottom:none;padding-bottom:4px">Allan variance σ(τ) — overlapping (X / Y / Z)</div>
+                <svg viewBox="0 0 {ALLAN_W} {ALLAN_H}" class="allan" style="background:#fff;border:1px solid var(--border);border-radius:4px">
+                  {#each Array.from({ length: Math.max(0, eMaxTau - eMinTau + 1) }, (_, k) => eMinTau + k) as e}
+                    {@const x = logScale(Math.pow(10, e), b.tauMin, b.tauMax, plotW, ALLAN_PAD.l)}
+                    <line x1={x} y1={ALLAN_PAD.t} x2={x} y2={ALLAN_H - ALLAN_PAD.b} stroke="var(--border)" stroke-dasharray="2 3" />
+                    <text x={x} y={ALLAN_H - ALLAN_PAD.b + 16} text-anchor="middle" font-size="10" fill="var(--text-muted)">10^{e}</text>
+                  {/each}
+                  {#each Array.from({ length: Math.max(0, Math.floor(eMaxSig) - Math.ceil(eMinSig) + 1) }, (_, k) => Math.ceil(eMinSig) + k) as e}
+                    {@const y = ALLAN_H - ALLAN_PAD.b - ((e - eMinSig) / (eMaxSig - eMinSig)) * plotH}
+                    <line x1={ALLAN_PAD.l} y1={y} x2={ALLAN_W - ALLAN_PAD.r} y2={y} stroke="var(--border)" stroke-dasharray="2 3" />
+                    <text x={ALLAN_PAD.l - 6} y={y + 3} text-anchor="end" font-size="10" fill="var(--text-muted)">10^{e}</text>
+                  {/each}
+                  <path d={buildAllanPath(a.sigma_x_dps, b, a.tau_s)} fill="none" stroke="var(--primary)" stroke-width="2" />
+                  <path d={buildAllanPath(a.sigma_y_dps, b, a.tau_s)} fill="none" stroke="var(--accent)" stroke-width="2" />
+                  <path d={buildAllanPath(a.sigma_z_dps, b, a.tau_s)} fill="none" stroke="var(--success)" stroke-width="2" />
+                  <text x={ALLAN_W/2} y={ALLAN_H - 4} text-anchor="middle" font-size="11" fill="var(--text-muted)">τ (s)</text>
+                  <text x="14" y={ALLAN_H/2} text-anchor="middle" font-size="11" fill="var(--text-muted)" transform="rotate(-90 14 {ALLAN_H/2})">σ(τ) (°/s)</text>
+                  <g transform="translate({ALLAN_W - ALLAN_PAD.r - 70}, {ALLAN_PAD.t + 6})">
+                    <rect x="-6" y="-4" width="76" height="52" fill="#fff" stroke="var(--border)" rx="3" />
+                    <line x1="0" y1="6" x2="14" y2="6" stroke="var(--primary)" stroke-width="2" />
+                    <text x="18" y="9" font-size="10" fill="var(--text)">X (yaw)</text>
+                    <line x1="0" y1="22" x2="14" y2="22" stroke="var(--accent)" stroke-width="2" />
+                    <text x="18" y="25" font-size="10" fill="var(--text)">Y (pitch)</text>
+                    <line x1="0" y1="38" x2="14" y2="38" stroke="var(--success)" stroke-width="2" />
+                    <text x="18" y="41" font-size="10" fill="var(--text)">Z (roll)</text>
+                  </g>
+                </svg>
+              </div>
+            {/if}
+
+            <!-- Histograma de Δt -->
+            <div style="margin-top:12px">
+              <div class="card-h" style="border-bottom:none;padding-bottom:4px">Histograma de Δt entre muestras</div>
+              <svg viewBox="0 0 400 140" style="width:100%;max-height:160px;background:#fff;border:1px solid var(--border);border-radius:4px">
+                {#each hist as bin, i}
+                  {@const w = 400 / hist.length}
+                  {@const h = (bin[1] / maxC) * 110}
+                  <rect x={i * w + 0.5} y={120 - h} width={Math.max(1, w - 1)} height={h} fill="var(--primary)" opacity="0.85" />
+                {/each}
+                <line x1="0" y1="120" x2="400" y2="120" stroke="var(--border-strong)" />
+                <text x="2" y="135" font-size="9" fill="var(--text-muted)">{hist[0]?.[0].toFixed(0) ?? 0} µs</text>
+                <text x="398" y="135" font-size="9" fill="var(--text-muted)" text-anchor="end">{hist[hist.length-1]?.[0].toFixed(0) ?? 0} µs</text>
+                <text x="200" y="135" font-size="9" fill="var(--text-muted)" text-anchor="middle">Δt (µs)</text>
+              </svg>
             </div>
             {#if capture.summary}
               <p class="note inline" style="margin-top:10px">
