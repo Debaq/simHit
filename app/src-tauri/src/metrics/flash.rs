@@ -15,6 +15,7 @@ use espflash::connection::reset::{ResetAfterOperation, ResetBeforeOperation};
 use espflash::flasher::{Flasher, ProgressCallbacks};
 use serde::Serialize;
 use serialport::{SerialPortType, UsbPortInfo};
+use sha2::{Digest, Sha256};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 
@@ -129,6 +130,65 @@ pub fn list_serial_ports() -> Result<Vec<UsbSerialPort>, FlashError> {
         }
     }
     Ok(out)
+}
+
+// Descarga un .bin del manifest desde Rust (bypasea CORS del webview),
+// verifica el SHA-256 opcional, y devuelve los bytes al frontend.
+// Emite 'flash://progress' con phase='downloading' durante la descarga.
+#[tauri::command]
+pub async fn download_firmware(
+    app: AppHandle,
+    url: String,
+    expected_sha256: Option<String>,
+) -> Result<Vec<u8>, FlashError> {
+    let _ = app.emit("flash://progress", FlashProgressEvent {
+        phase: "downloading".into(),
+        current: 0, total: 0,
+        message: Some(format!("GET {}", url)),
+    });
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| FlashError::new("ReqwestInitFailed", e.to_string()))?;
+    let mut resp = client.get(&url).send().await
+        .map_err(|e| FlashError::new("HttpError", e.to_string()))?;
+    if !resp.status().is_success() {
+        return Err(FlashError::new(
+            "HttpError",
+            format!("{} → HTTP {}", url, resp.status()),
+        ));
+    }
+    let total = resp.content_length().unwrap_or(0) as usize;
+
+    let mut bytes = Vec::with_capacity(total.max(1024));
+    let mut last_emit = std::time::Instant::now();
+    while let Some(chunk) = resp.chunk().await
+        .map_err(|e| FlashError::new("HttpError", e.to_string()))? {
+        bytes.extend_from_slice(&chunk);
+        if last_emit.elapsed().as_millis() >= 100 {
+            last_emit = std::time::Instant::now();
+            let _ = app.emit("flash://progress", FlashProgressEvent {
+                phase: "downloading".into(),
+                current: bytes.len(),
+                total,
+                message: None,
+            });
+        }
+    }
+
+    if let Some(expected) = expected_sha256 {
+        let mut h = Sha256::new();
+        h.update(&bytes);
+        let got = h.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>();
+        if got != expected.to_lowercase() {
+            return Err(FlashError::new(
+                "Sha256Mismatch",
+                format!("esperado {}, obtenido {}", expected, got),
+            ));
+        }
+    }
+    Ok(bytes)
 }
 
 #[tauri::command]

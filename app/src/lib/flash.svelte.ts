@@ -63,18 +63,6 @@ type ProgressEvent = {
   message: string | null;
 };
 
-function hex(buf: ArrayBuffer): string {
-  const arr = new Uint8Array(buf);
-  let s = '';
-  for (let i = 0; i < arr.length; i++) s += arr[i].toString(16).padStart(2, '0');
-  return s;
-}
-
-async function sha256(bytes: Uint8Array): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
-  return hex(buf);
-}
-
 class FlashStore {
   stage = $state<FlashStage>('idle');
   // Progreso 0..1 del paso actual (download o flash); -1 si indeterminado.
@@ -129,22 +117,18 @@ class FlashStore {
     }
 
     try {
+      // Subscribe a eventos de progreso del backend ANTES de la descarga para
+      // capturar también las fases 'downloading'.
+      this.unlisten = await listen<ProgressEvent>('flash://progress', (e) => this.onProgress(e.payload));
+
       this.stage = 'downloading';
       this.message = `Descargando ${artifact.url.split('/').pop()}…`;
-      const bytes = await this.download(artifact.url);
-
-      if (artifact.sha256) {
-        this.stage = 'verifying';
-        this.message = 'Verificando SHA-256';
-        const got = await sha256(bytes);
-        if (got !== artifact.sha256.toLowerCase()) {
-          this.fail(`SHA-256 no coincide. Esperado ${artifact.sha256}, obtenido ${got}`);
-          return;
-        }
-      }
-
-      // Subscribe a eventos de progreso del backend.
-      this.unlisten = await listen<ProgressEvent>('flash://progress', (e) => this.onProgress(e.payload));
+      // La descarga la hace Rust con reqwest: bypasea CORS del webview y
+      // valida SHA-256 inline si el manifest lo provee.
+      const bytes = new Uint8Array(await invoke<number[]>('download_firmware', {
+        url: artifact.url,
+        expectedSha256: artifact.sha256,
+      }));
 
       this.stage = 'connecting';
       this.message = 'Conectando al ESP…';
@@ -170,39 +154,9 @@ class FlashStore {
     }
   }
 
-  private async download(url: string): Promise<Uint8Array> {
-    const r = await fetch(url, { cache: 'no-store' });
-    if (!r.ok) throw new Error(`HTTP ${r.status} al descargar ${url}`);
-    const total = Number(r.headers.get('content-length') ?? 0);
-    this.totalBytes = total;
-
-    if (!r.body) {
-      const buf = await r.arrayBuffer();
-      this.downloadedBytes = buf.byteLength;
-      return new Uint8Array(buf);
-    }
-
-    const reader = r.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let received = 0;
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) {
-        chunks.push(value);
-        received += value.length;
-        this.downloadedBytes = received;
-        if (total > 0) this.progress = received / total;
-      }
-    }
-    const out = new Uint8Array(received);
-    let off = 0;
-    for (const c of chunks) { out.set(c, off); off += c.length; }
-    return out;
-  }
-
   private onProgress(e: ProgressEvent) {
-    if (e.phase === 'connect') this.stage = 'connecting';
+    if (e.phase === 'downloading') this.stage = 'downloading';
+    else if (e.phase === 'connect') this.stage = 'connecting';
     else if (e.phase === 'write') this.stage = 'writing';
     else if (e.phase === 'reset') this.stage = 'resetting';
     else if (e.phase === 'done') this.stage = 'done';
