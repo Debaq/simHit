@@ -39,7 +39,7 @@
 // Versión del firmware. Sincronizar con firmware/manifest.json cada vez que se
 // haga un release. El cliente la usa para chequear actualizaciones contra el
 // manifest del repo.
-#define FW_VERSION_STRING "1.2.0"
+#define FW_VERSION_STRING "1.2.1"
 
 // ──────────────────── Selección del driver de sensor ────────────────────
 // La CI pasa -DSENSOR_DRIVER=<MACRO> al compilador para producir un .bin por
@@ -267,9 +267,30 @@ struct CalState {
 static CalState calState = {};
 
 // Tiempo mínimo desde boot (ms) antes de aceptar IMU CAL. El gyro deriva
-// rápido por auto-calentamiento del IC durante el primer minuto. Bypaseable
-// con "IMU CAL FORCE" para debugging o sesiones ultra-cortas.
-static const uint32_t CAL_PREHEAT_MS = 60000;
+// rápido por auto-calentamiento del IC durante el primer minuto.
+// Calibrado por driver según datasheet de cada chip:
+//   L3G:        ruido alto, drift térmico significativo durante 60 s.
+//   ICM-42688:  datasheet declara gyro startup ≈ 45 ms, pero el drift
+//               térmico (~0.01 °/s/°C) sigue durante ~20 s post-boot.
+//   MPU-9250 / MPU-6050: típico 30-40 s hasta estabilizarse.
+//   BNO055:    fusión interna compensa parcialmente; 20 s es suficiente.
+//   HW-579 (ITG):  ITG-3205 tiene drift térmico similar al L3G; 45 s.
+// Bypaseable con "IMU CAL FORCE" para debugging o sesiones ultra-cortas.
+#if SENSOR_DRIVER == L3G_LSM303
+  static const uint32_t CAL_PREHEAT_MS = 60000;
+#elif SENSOR_DRIVER == ICM_42688
+  static const uint32_t CAL_PREHEAT_MS = 20000;
+#elif SENSOR_DRIVER == MPU9250
+  static const uint32_t CAL_PREHEAT_MS = 30000;
+#elif SENSOR_DRIVER == MPU_6050
+  static const uint32_t CAL_PREHEAT_MS = 30000;
+#elif SENSOR_DRIVER == BNO055
+  static const uint32_t CAL_PREHEAT_MS = 20000;
+#elif SENSOR_DRIVER == ITG_ADXL_HMC
+  static const uint32_t CAL_PREHEAT_MS = 45000;
+#else
+  static const uint32_t CAL_PREHEAT_MS = 60000;
+#endif
 
 // Offsets de orientación (resetean a cero al CAL)
 float yaw_off = 0.0f, pitch_off = 0.0f, roll_off = 0.0f;
@@ -1655,13 +1676,56 @@ void printImuStatus() {
 struct MagSample { float x, y, z; };
 static MagSample magBuf[MAG_BUF_MAX];
 
+// Lectura genérica del magnetómetro para los flujos auxiliares (MAG CAL,
+// diagnóstico). Devuelve true si el driver activo tiene mag y la lectura
+// funcionó. NaN-friendly: a diferencia del path principal en sampleAndFuse,
+// acá necesitamos valores numéricos para acumular en el bounding box.
+//
+// Cada driver decide cómo accederlo:
+//   - L3G_LSM303: Adafruit_LSM303DLH_Mag_Unified (heredado).
+//   - MPU9250: lectura raw del AK8963 vía bypass I²C.
+//   - ITG_ADXL_HMC: hmcReadMag() — falla limpio si HMC no respondió al init.
+//   - ICM-42688 / MPU-6050: sin mag → return false.
+//   - BNO055: el mag interno lo consume la fusión Bosch; no lo exponemos
+//     crudo para no agregar overhead I²C. MAG CAL no aplica acá tampoco.
+bool readMagRaw(float& mx, float& my, float& mz) {
+#if SENSOR_DRIVER == L3G_LSM303
+  sensors_event_t me;
+  magSensor.getEvent(&me);
+  mx = me.magnetic.x; my = me.magnetic.y; mz = me.magnetic.z;
+  return true;
+#elif SENSOR_DRIVER == MPU9250
+  uint8_t m[7];
+  if (!mpuReadBytes(AK8963_ADDR, AK8963_REG_DATA_X_L, m, 7)) return false;
+  int16_t rmx = (int16_t)((m[1] << 8) | m[0]);
+  int16_t rmy = (int16_t)((m[3] << 8) | m[2]);
+  int16_t rmz = (int16_t)((m[5] << 8) | m[4]);
+  mx = rmx * AK8963_MAG_SENS_UT;
+  my = rmy * AK8963_MAG_SENS_UT;
+  mz = rmz * AK8963_MAG_SENS_UT;
+  return true;
+#elif SENSOR_DRIVER == ITG_ADXL_HMC
+  return hmcReadMag(mx, my, mz);
+#else
+  // Sin magnetómetro físicamente accesible.
+  (void)mx; (void)my; (void)mz;
+  return false;
+#endif
+}
+
 void calibrateMag() {
-#if SENSOR_DRIVER != L3G_LSM303
-  // MAG CAL solo soportado en L3G_LSM303 (única familia con API Adafruit del
-  // magnetómetro). MPU9250 tiene AK8963 pero requiere refactor del flow.
-  Serial.println("MAG CAL not supported - skip");
+#if IMU_HAS_MAG == 0
+  Serial.println("MAG CAL not supported - sensor sin magnetómetro");
   return;
 #else
+  // El BNO055 tiene mag físico pero la fusión Bosch hace su propia calibración
+  // del mag (CALIB_STAT). Nuestro flujo de bounding-box duplicaría esfuerzo
+  // y se pisarían las correcciones del chip — saltar.
+#if SENSOR_DRIVER == BNO055
+  Serial.println("MAG CAL skip - BNO055 calibra el mag internamente");
+  return;
+#endif
+
   bool prev_start = start_imu;
   start_imu = false;
 
@@ -1673,11 +1737,15 @@ void calibrateMag() {
   Serial.println("s");
 
   // Primera muestra
-  sensors_event_t me;
-  magSensor.getEvent(&me);
-  float mx_min = me.magnetic.x, mx_max = me.magnetic.x;
-  float my_min = me.magnetic.y, my_max = me.magnetic.y;
-  float mz_min = me.magnetic.z, mz_max = me.magnetic.z;
+  float mx0, my0, mz0;
+  if (!readMagRaw(mx0, my0, mz0)) {
+    Serial.println("MAG CAL fail - el mag no respondió");
+    start_imu = prev_start;
+    return;
+  }
+  float mx_min = mx0, mx_max = mx0;
+  float my_min = my0, my_max = my0;
+  float mz_min = mz0, mz_max = mz0;
 
   uint32_t bufCount = 0;
   uint8_t  octantMask = 0; // bit i = octante i visitado (i = sx<<2 | sy<<1 | sz)
@@ -1691,8 +1759,11 @@ void calibrateMag() {
     if (elapsed >= MAG_MAX_MS) break;
     if (elapsed >= MAG_MIN_MS && octantMask == 0xFF) break;
 
-    magSensor.getEvent(&me);
-    float x = me.magnetic.x, y = me.magnetic.y, z = me.magnetic.z;
+    float x, y, z;
+    if (!readMagRaw(x, y, z)) {
+      // Lectura puntual fallida: saltar este sample, no romper el flujo.
+      continue;
+    }
 
     if (x < mx_min) mx_min = x;
     if (x > mx_max) mx_max = x;
@@ -1840,7 +1911,7 @@ void calibrateMag() {
   Serial.println(mz_scl, 3);
 
   start_imu = prev_start;
-#endif  // SENSOR_DRIVER != L3G_LSM303
+#endif  // IMU_HAS_MAG
 }
 
 void clearMagCal() {
