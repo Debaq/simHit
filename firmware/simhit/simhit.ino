@@ -16,11 +16,12 @@
 //   para compatibilidad con firmwares previos.
 //   Salida legacy: 6 floats (firmware antiguo). Cliente tolera los 3 formatos.
 //
-//   Entrada: "IMU ON" | "IMU OFF" | "IMU CAL" | "IMU CLR" | "IMU STATUS"
+//   Entrada: "IMU ON" | "IMU OFF" | "IMU CAL" | "IMU CAL FORCE" |
+//            "IMU CLR" | "IMU STATUS"
 //            "MAG CAL" | "MAG CLR" | "MAG STATUS"
 //            "LASER ON" | "LASER OFF" | "LASER STATUS"
 //            "FILTER SG" | "FILTER IIR" | "FILTER NONE" | "FILTER STATUS"
-//            "HELLO" | "VERSION" | "RESET"
+//            "HELLO" | "VERSION" | "SENSOR" | "RESET"
 //
 //   El comando FILTER selecciona el método de cálculo de la aceleración
 //   angular y se persiste en NVS (clave "accelFilt"). Default: SG.
@@ -38,7 +39,7 @@
 // Versión del firmware. Sincronizar con firmware/manifest.json cada vez que se
 // haga un release. El cliente la usa para chequear actualizaciones contra el
 // manifest del repo.
-#define FW_VERSION_STRING "1.1.1"
+#define FW_VERSION_STRING "1.2.0"
 
 // ──────────────────── Selección del driver de sensor ────────────────────
 // La CI pasa -DSENSOR_DRIVER=<MACRO> al compilador para producir un .bin por
@@ -47,10 +48,12 @@
 //   1) Agregar su macro al bloque #define <NEW> N de abajo.
 //   2) Implementar las funciones del driver con #if SENSOR_DRIVER == <NEW>
 //   3) Agregar la entrada a strategy.matrix.sensor en firmware-release.yml.
-#define L3G_LSM303 1
-#define ICM_42688  2
-#define MPU9250    3
-#define BNO055     4
+#define L3G_LSM303    1
+#define ICM_42688     2
+#define MPU9250       3
+#define BNO055        4
+#define MPU_6050      5
+#define ITG_ADXL_HMC  6
 
 #ifndef SENSOR_DRIVER
   #define SENSOR_DRIVER L3G_LSM303
@@ -74,8 +77,16 @@
   #define IMU_HAS_MAG 1
   #define IMU_HAS_ACCEL 1
   #define IMU_NAME_LITERAL "BNO055"
+#elif SENSOR_DRIVER == MPU_6050
+  #define IMU_HAS_MAG 0
+  #define IMU_HAS_ACCEL 1
+  #define IMU_NAME_LITERAL "MPU-6050"
+#elif SENSOR_DRIVER == ITG_ADXL_HMC
+  #define IMU_HAS_MAG 1
+  #define IMU_HAS_ACCEL 1
+  #define IMU_NAME_LITERAL "ITG-3205 + ADXL345 + HMC5883L"
 #else
-  #error "SENSOR_DRIVER no reconocido. Valores válidos: L3G_LSM303 | ICM_42688 | MPU9250 | BNO055"
+  #error "SENSOR_DRIVER no reconocido. Válidos: L3G_LSM303 | ICM_42688 | MPU9250 | BNO055 | MPU_6050 | ITG_ADXL_HMC"
 #endif
 
 #define I2C_SDA_PIN 6
@@ -165,6 +176,60 @@ static const float BNO_GYR_SENS_DPS = 1.0f / 16.0f;
 static const float BNO_ACC_SENS_MS2 = 1.0f / 100.0f;
 #endif
 
+#if SENSOR_DRIVER == MPU_6050
+// MPU-6050 (InvenSense). Clon del MPU-9250 sin AK8963. I²C 0x68/0x69.
+// WHO_AM_I @ 0x75 devuelve 0x68 (su propia 7-bit addr con bit 0 = AD0).
+static uint8_t mpu6050Addr = 0x68;
+#define MPU6050_REG_PWR_MGMT_1   0x6B
+#define MPU6050_REG_GYRO_CONFIG  0x1B
+#define MPU6050_REG_ACCEL_CONFIG 0x1C
+#define MPU6050_REG_ACCEL_XOUT_H 0x3B
+#define MPU6050_REG_TEMP_OUT_H   0x41
+#define MPU6050_REG_WHO_AM_I     0x75
+#define MPU6050_WHO_AM_I_VAL     0x68
+// Gyro ±2000 dps → 16.4 LSB/dps. Accel ±16g → 2048 LSB/g.
+static const float MPU6050_GYRO_SENS_DPS  = 1.0f / 16.4f;
+static const float MPU6050_ACCEL_SENS_MS2 = 9.80665f / 2048.0f;
+#endif
+
+#if SENSOR_DRIVER == ITG_ADXL_HMC
+// HW-579: ITG-3205 (gyro 0x68/0x69) + ADXL345 (accel 0x53) + HMC5883L (mag 0x1E).
+// ⚠ Algunos clones traen QMC5883L en lugar de HMC5883L (mapping distinto).
+// El driver intenta HMC primero; fallback queda en TODO.
+
+// ITG-3205
+static uint8_t itgAddr = 0x68;
+#define ITG_REG_WHO_AM_I  0x00   // devuelve I²C addr (0x68/0x69)
+#define ITG_REG_SMPLRT_DIV 0x15
+#define ITG_REG_DLPF_FS    0x16  // ±2000 dps + LPF
+#define ITG_REG_PWR_MGM    0x3E
+#define ITG_REG_GYRO_XOUT_H 0x1D // 8 bytes: TEMP_H,TEMP_L,GX_H,GX_L,GY_H,GY_L,GZ_H,GZ_L
+// ±2000 dps → 14.375 LSB/(°/s)
+static const float ITG_GYRO_SENS_DPS = 1.0f / 14.375f;
+
+// ADXL345
+#define ADXL_ADDR          0x53
+#define ADXL_REG_DEVID     0x00  // 0xE5
+#define ADXL_REG_POWER_CTL 0x2D  // 0x08 = measure mode
+#define ADXL_REG_DATA_FORMAT 0x31
+#define ADXL_REG_BW_RATE   0x2C  // 0x0C = 400 Hz output
+#define ADXL_REG_DATAX0    0x32  // 6 bytes little-endian: X_L,X_H,Y_L,Y_H,Z_L,Z_H
+#define ADXL_DEVID_VAL     0xE5
+// Full-res ±16g: 4 mg/LSB → m/s² / LSB
+static const float ADXL_ACCEL_SENS_MS2 = 0.004f * 9.80665f;
+
+// HMC5883L
+#define HMC_ADDR           0x1E
+#define HMC_REG_CONFIG_A   0x00
+#define HMC_REG_CONFIG_B   0x01
+#define HMC_REG_MODE       0x02
+#define HMC_REG_DATA_X_H   0x03  // 6 bytes big-endian, orden raro: X,Z,Y
+#define HMC_REG_ID_A       0x0A  // 'H' = 0x48
+#define HMC_ID_A_VAL       0x48
+// Gain por defecto ±1.3 gauss → 1090 LSB/gauss = 0.092 µT/LSB
+static const float HMC_MAG_SENS_UT = 100.0f / 1090.0f;  // 1 gauss = 100 µT
+#endif
+
 // Filtro de fusión
 Adafruit_Madgwick filter;
 
@@ -181,6 +246,30 @@ float mx_off = 0.0f, my_off = 0.0f, mz_off = 0.0f;
 float mx_scl = 1.0f, my_scl = 1.0f, mz_scl = 1.0f;
 
 Preferences prefs;
+
+// Snapshot completo de la última calibración IMU. Persiste en NVS para
+// trazabilidad (auditoría del paper, telemetría entre sesiones). Si no hay
+// CAL previa en NVS, schema_version queda en 0 y el cliente lo interpreta
+// como "calibrar antes del primer examen".
+#pragma pack(push, 1)
+struct CalState {
+  uint32_t schema_version;   // 1; 0 = no cal previa
+  float    bias_xyz[3];      // rad/s (resta aplicada en sampleAndFuse)
+  float    sd_dps_xyz[3];    // ruido medido durante el segundo de quietud (°/s)
+  float    accel_mag_ms2;    // ‖a‖ media durante CAL — debe ≈9.80
+  float    accel_sd_ms2;     // varianza del módulo de accel
+  float    temp_c;           // temperatura del chip al momento de la CAL
+  uint32_t ts_ms;            // millis() al momento de la CAL
+  uint32_t fw_hash;          // hash de FW_VERSION_STRING (CRC-16)
+  uint32_t sensor_driver;    // valor del macro SENSOR_DRIVER (1..4)
+};
+#pragma pack(pop)
+static CalState calState = {};
+
+// Tiempo mínimo desde boot (ms) antes de aceptar IMU CAL. El gyro deriva
+// rápido por auto-calentamiento del IC durante el primer minuto. Bypaseable
+// con "IMU CAL FORCE" para debugging o sesiones ultra-cortas.
+static const uint32_t CAL_PREHEAT_MS = 60000;
 
 // Offsets de orientación (resetean a cero al CAL)
 float yaw_off = 0.0f, pitch_off = 0.0f, roll_off = 0.0f;
@@ -327,6 +416,47 @@ const char* accelFilterName(AccelFilter f) {
   return "SG";
 }
 
+// CRC-16 reusable para hash corto de la versión del firmware en NVS. No es
+// criptográfico; solo permite detectar "esta CAL fue hecha con otro fw, descartar".
+static uint16_t crc16Helper(const char* s) {
+  uint16_t crc = 0xFFFF;
+  for (const char* p = s; *p; p++) {
+    crc ^= ((uint16_t)(*p) & 0xFF) << 8;
+    for (int b = 0; b < 8; b++) {
+      crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+    }
+  }
+  return crc;
+}
+
+void saveCalState() {
+  prefs.begin("simhit", false);
+  prefs.putBytes("cal", &calState, sizeof(calState));
+  prefs.end();
+}
+
+void loadCalState() {
+  prefs.begin("simhit", true);
+  size_t got = prefs.getBytesLength("cal");
+  if (got == sizeof(calState)) {
+    prefs.getBytes("cal", &calState, sizeof(calState));
+    // Si el binario es de otra versión del firmware o de otro driver, no
+    // confiar en el bias (puede tener semántica distinta).
+    uint16_t fwh = crc16Helper(FW_VERSION_STRING);
+    if (calState.fw_hash != fwh || calState.sensor_driver != (uint32_t)SENSOR_DRIVER) {
+      calState = {};
+    } else {
+      // Aplicar el bias persistido al estado en RAM.
+      gx_bias = calState.bias_xyz[0];
+      gy_bias = calState.bias_xyz[1];
+      gz_bias = calState.bias_xyz[2];
+    }
+  } else {
+    calState = {};
+  }
+  prefs.end();
+}
+
 void saveAccelFilter() {
   prefs.begin("simhit", false);
   prefs.putUChar("accelFilt", (uint8_t)accelFilter);
@@ -413,6 +543,10 @@ void scanGyroWhoAmI() {
     Serial.println(name);
   }
 }
+
+// L3G no expone temperatura del chip por API Adafruit; el LSM303 podría
+// hacerlo pero requiere acceso raw a 0x05/0x06 (no implementado).
+float l3gReadTempC() { return NAN; }
 #endif  // SENSOR_DRIVER == L3G_LSM303
 
 // ─────────── Driver ICM-42688 (SIN testear con hardware) ───────────
@@ -469,6 +603,14 @@ bool icmRead(float& gx, float& gy, float& gz, float& ax, float& ay, float& az) {
   ay = ray * ICM_ACCEL_SENS_G * 9.80665f;
   az = raz * ICM_ACCEL_SENS_G * 9.80665f;
   return true;
+}
+
+// ICM-42688 TEMP_DATA1/0 en 0x1D/0x1E. Tempc = (raw / 132.48) + 25 (datasheet).
+float icmReadTempC() {
+  uint8_t b[2];
+  if (!icmReadBytes(icmAddr, 0x1D, b, 2)) return NAN;
+  int16_t raw = (int16_t)((b[0] << 8) | b[1]);
+  return ((float)raw / 132.48f) + 25.0f;
 }
 #endif  // SENSOR_DRIVER == ICM_42688
 
@@ -542,6 +684,14 @@ bool mpuRead(float& gx, float& gy, float& gz, float& ax, float& ay, float& az,
   } else { mx = my = mz = 0.0f; }
   return true;
 }
+
+// MPU-9250 TEMP_OUT_H/L en 0x41/0x42. Tempc = (raw / 333.87) + 21 (datasheet rev 1.1).
+float mpuReadTempC() {
+  uint8_t b[2];
+  if (!mpuReadBytes(mpuAddr, 0x41, b, 2)) return NAN;
+  int16_t raw = (int16_t)((b[0] << 8) | b[1]);
+  return ((float)raw / 333.87f) + 21.0f;
+}
 #endif  // SENSOR_DRIVER == MPU9250
 
 // ─────────── Driver BNO055 (SIN testear con hardware) ───────────
@@ -605,7 +755,189 @@ bool bnoRead(float& yaw_deg, float& roll_deg, float& pitch_deg,
   az_ms2 = az * BNO_ACC_SENS_MS2;
   return true;
 }
+
+// BNO055 TEMP en 0x34, int8_t en °C (datasheet 1.4).
+float bnoReadTempC() {
+  uint8_t b;
+  if (!bnoReadBytes(0x34, &b, 1)) return NAN;
+  return (float)((int8_t)b);
+}
 #endif  // SENSOR_DRIVER == BNO055
+
+// ─────────── Driver MPU-6050 (SIN testear con hardware) ───────────
+#if SENSOR_DRIVER == MPU_6050
+bool mpu6050ReadBytes(uint8_t reg, uint8_t* out, uint8_t n) {
+  Wire.beginTransmission(mpu6050Addr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((int)mpu6050Addr, (int)n) != n) return false;
+  for (uint8_t i = 0; i < n; i++) out[i] = Wire.read();
+  return true;
+}
+
+bool mpu6050Init() {
+  delay(50);
+  const uint8_t candidates[] = { 0x68, 0x69 };
+  bool found = false;
+  for (uint8_t a : candidates) {
+    int v = readReg8(a, MPU6050_REG_WHO_AM_I);
+    if (v == MPU6050_WHO_AM_I_VAL) { mpu6050Addr = a; found = true; break; }
+  }
+  if (!found) return false;
+  // Wake from sleep + clock = PLL X-gyro (más estable que oscilador interno).
+  if (!writeReg8(mpu6050Addr, MPU6050_REG_PWR_MGMT_1, 0x01)) return false;
+  delay(20);
+  // ±2000 dps (FS_SEL=11 → bits[4:3]).
+  if (!writeReg8(mpu6050Addr, MPU6050_REG_GYRO_CONFIG, 0x18)) return false;
+  // ±16 g (AFS_SEL=11 → bits[4:3]).
+  if (!writeReg8(mpu6050Addr, MPU6050_REG_ACCEL_CONFIG, 0x18)) return false;
+  delay(10);
+  return true;
+}
+
+bool mpu6050Read(float& gx, float& gy, float& gz, float& ax, float& ay, float& az) {
+  uint8_t b[14];
+  if (!mpu6050ReadBytes(MPU6050_REG_ACCEL_XOUT_H, b, 14)) return false;
+  int16_t rax = (int16_t)((b[0] << 8) | b[1]);
+  int16_t ray = (int16_t)((b[2] << 8) | b[3]);
+  int16_t raz = (int16_t)((b[4] << 8) | b[5]);
+  // b[6..7] = temp (ignorada en read, leída por separado)
+  int16_t rgx = (int16_t)((b[8]  << 8) | b[9]);
+  int16_t rgy = (int16_t)((b[10] << 8) | b[11]);
+  int16_t rgz = (int16_t)((b[12] << 8) | b[13]);
+  gx = rgx * MPU6050_GYRO_SENS_DPS * 0.0174532925f;
+  gy = rgy * MPU6050_GYRO_SENS_DPS * 0.0174532925f;
+  gz = rgz * MPU6050_GYRO_SENS_DPS * 0.0174532925f;
+  ax = rax * MPU6050_ACCEL_SENS_MS2;
+  ay = ray * MPU6050_ACCEL_SENS_MS2;
+  az = raz * MPU6050_ACCEL_SENS_MS2;
+  return true;
+}
+
+// MPU-6050 TEMP_OUT_H/L en 0x41/0x42. Tempc = (raw / 340) + 36.53 (datasheet).
+float mpu6050ReadTempC() {
+  uint8_t b[2];
+  if (!mpu6050ReadBytes(MPU6050_REG_TEMP_OUT_H, b, 2)) return NAN;
+  int16_t raw = (int16_t)((b[0] << 8) | b[1]);
+  return ((float)raw / 340.0f) + 36.53f;
+}
+#endif  // SENSOR_DRIVER == MPU_6050
+
+// ─────────── Driver HW-579 = ITG-3205 + ADXL345 + HMC5883L (SIN testear) ───────────
+#if SENSOR_DRIVER == ITG_ADXL_HMC
+bool itgReadBytes(uint8_t reg, uint8_t* out, uint8_t n) {
+  Wire.beginTransmission(itgAddr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((int)itgAddr, (int)n) != n) return false;
+  for (uint8_t i = 0; i < n; i++) out[i] = Wire.read();
+  return true;
+}
+
+bool adxlReadBytes(uint8_t reg, uint8_t* out, uint8_t n) {
+  Wire.beginTransmission((uint8_t)ADXL_ADDR);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((int)ADXL_ADDR, (int)n) != n) return false;
+  for (uint8_t i = 0; i < n; i++) out[i] = Wire.read();
+  return true;
+}
+
+bool hmcReadBytes(uint8_t reg, uint8_t* out, uint8_t n) {
+  Wire.beginTransmission((uint8_t)HMC_ADDR);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((int)HMC_ADDR, (int)n) != n) return false;
+  for (uint8_t i = 0; i < n; i++) out[i] = Wire.read();
+  return true;
+}
+
+bool itgAdxlHmcInit() {
+  delay(20);
+  // ITG-3205: probar 0x68 y 0x69. WHO_AM_I devuelve su propia addr.
+  const uint8_t cand[] = { 0x68, 0x69 };
+  bool itg_found = false;
+  for (uint8_t a : cand) {
+    int v = readReg8(a, ITG_REG_WHO_AM_I);
+    if (v == a) { itgAddr = a; itg_found = true; break; }
+  }
+  if (!itg_found) return false;
+  // PWR_MGM: clock = PLL X-gyro.
+  if (!writeReg8(itgAddr, ITG_REG_PWR_MGM, 0x01)) return false;
+  // DLPF_FS: ±2000 dps (FS_SEL=3 → bits[4:3]=11) + DLPF 42 Hz (bits[2:0]=011).
+  if (!writeReg8(itgAddr, ITG_REG_DLPF_FS, 0x1B)) return false;
+  // Sample rate divider: con DLPF habilitado, fs_int=1 kHz. Div=4 → 200 Hz.
+  if (!writeReg8(itgAddr, ITG_REG_SMPLRT_DIV, 4)) return false;
+  delay(10);
+
+  // ADXL345: identificar y configurar full-res ±16 g a 400 Hz.
+  int devid = readReg8(ADXL_ADDR, ADXL_REG_DEVID);
+  if (devid != ADXL_DEVID_VAL) return false;
+  if (!writeReg8(ADXL_ADDR, ADXL_REG_BW_RATE, 0x0C)) return false;     // 400 Hz
+  if (!writeReg8(ADXL_ADDR, ADXL_REG_DATA_FORMAT, 0x0B)) return false; // full-res ±16g
+  if (!writeReg8(ADXL_ADDR, ADXL_REG_POWER_CTL, 0x08)) return false;   // measure mode
+  delay(5);
+
+  // HMC5883L: gain default ±1.3 G, 8 promedios, modo continuo.
+  // QMC5883L tiene mapping distinto — si HMC falla, el flujo sigue sin mag.
+  int hmc_id = readReg8(HMC_ADDR, HMC_REG_ID_A);
+  if (hmc_id == HMC_ID_A_VAL) {
+    writeReg8(HMC_ADDR, HMC_REG_CONFIG_A, 0x70); // 8-avg, 15 Hz, normal
+    writeReg8(HMC_ADDR, HMC_REG_CONFIG_B, 0x20); // ±1.3 G
+    writeReg8(HMC_ADDR, HMC_REG_MODE, 0x00);     // continuous
+    delay(10);
+  }
+  // El ITG es el chip indispensable; si HMC no responde, igual seguimos
+  // (driver entrega mag NaN y la fusión cae a 6-DOF automáticamente).
+  return true;
+}
+
+bool itgRead(float& gx, float& gy, float& gz) {
+  uint8_t b[8];
+  if (!itgReadBytes(ITG_REG_GYRO_XOUT_H, b, 8)) return false;
+  // b[0..1] = TEMP (ignorada en read, leída por separado)
+  int16_t rgx = (int16_t)((b[2] << 8) | b[3]);
+  int16_t rgy = (int16_t)((b[4] << 8) | b[5]);
+  int16_t rgz = (int16_t)((b[6] << 8) | b[7]);
+  gx = rgx * ITG_GYRO_SENS_DPS * 0.0174532925f;
+  gy = rgy * ITG_GYRO_SENS_DPS * 0.0174532925f;
+  gz = rgz * ITG_GYRO_SENS_DPS * 0.0174532925f;
+  return true;
+}
+
+bool adxlReadAccel(float& ax, float& ay, float& az) {
+  uint8_t b[6];
+  if (!adxlReadBytes(ADXL_REG_DATAX0, b, 6)) return false;
+  int16_t rx = (int16_t)((b[1] << 8) | b[0]);
+  int16_t ry = (int16_t)((b[3] << 8) | b[2]);
+  int16_t rz = (int16_t)((b[5] << 8) | b[4]);
+  ax = rx * ADXL_ACCEL_SENS_MS2;
+  ay = ry * ADXL_ACCEL_SENS_MS2;
+  az = rz * ADXL_ACCEL_SENS_MS2;
+  return true;
+}
+
+bool hmcReadMag(float& mx, float& my, float& mz) {
+  uint8_t b[6];
+  if (!hmcReadBytes(HMC_REG_DATA_X_H, b, 6)) return false;
+  // HMC entrega los 3 ejes en orden X, Z, Y (sí, raro). Big-endian.
+  int16_t rx = (int16_t)((b[0] << 8) | b[1]);
+  int16_t rz = (int16_t)((b[2] << 8) | b[3]);
+  int16_t ry = (int16_t)((b[4] << 8) | b[5]);
+  mx = rx * HMC_MAG_SENS_UT;
+  my = ry * HMC_MAG_SENS_UT;
+  mz = rz * HMC_MAG_SENS_UT;
+  return true;
+}
+
+// ITG-3205 TEMP_OUT en 0x1B/0x1C. Tempc = 35 + (raw + 13200) / 280.
+float itgReadTempC() {
+  uint8_t b[2];
+  if (!itgReadBytes(0x1B, b, 2)) return NAN;
+  int16_t raw = (int16_t)((b[0] << 8) | b[1]);
+  return 35.0f + ((float)raw + 13200.0f) / 280.0f;
+}
+#endif  // SENSOR_DRIVER == ITG_ADXL_HMC
 
 void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
@@ -694,11 +1026,37 @@ void setup() {
     Serial.println("No BNO055 detected");
     while (1) delay(10);
   }
+#elif SENSOR_DRIVER == MPU_6050
+  {
+    int who = readReg8(mpu6050Addr, MPU6050_REG_WHO_AM_I);
+    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(mpu6050Addr, HEX);
+    Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
+    Serial.print(who, HEX); Serial.println(" (MPU-6050)");
+  }
+  Serial.println("Initializing MPU-6050...");
+  if (!mpu6050Init()) {
+    Serial.println("No MPU-6050 detected");
+    while (1) delay(10);
+  }
+#elif SENSOR_DRIVER == ITG_ADXL_HMC
+  {
+    int who = readReg8(itgAddr, ITG_REG_WHO_AM_I);
+    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(itgAddr, HEX);
+    Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
+    Serial.print(who, HEX); Serial.println(" (ITG-3205)");
+  }
+  Serial.println("Initializing HW-579 (ITG-3205 + ADXL345 + HMC5883L)...");
+  if (!itgAdxlHmcInit()) {
+    Serial.println("No HW-579 detected (revisar ITG y ADXL al menos)");
+    while (1) delay(10);
+  }
 #endif
 
   filter.begin(SAMPLE_RATE_HZ);
 
-  // Bias gyro y orientación: session-only, requiere "IMU CAL" tras conectar.
+  // Cargar última CAL persistida en NVS (si existe y es coherente con el
+  // firmware/driver actual). Mantiene la trazabilidad entre power-cycles.
+  loadCalState();
   loadMagCal();
   loadAccelFilter();
   Serial.print("Accel filter = ");
@@ -724,94 +1082,87 @@ void loop() {
 
 // Lee los tres sensores y actualiza el filtro. Mantener el filtro
 // "caliente" aunque IMU OFF para evitar transitorios al activar.
+//
+// Política: el firmware reporta lo que físicamente puede leer. Cualquier eje
+// no soportado por el chip (o ilegible) queda como NaN. La decisión de
+// "fusión 6-DOF vs 9-DOF" es runtime — depende de si los 3 ejes de mag son
+// finitos en este tick. Sin compile-time policy por sensor. Esto deja que
+// el software decida cómo interpretar el dataset.
 void sampleAndFuse() {
+  // Locales en unidades canónicas (rad/s, m/s², µT, °C). Default NaN.
+  float gx_rad = NAN, gy_rad = NAN, gz_rad = NAN;
+  float ax_ms2 = NAN, ay_ms2 = NAN, az_ms2 = NAN;
+  float mx_uT  = NAN, my_uT  = NAN, mz_uT  = NAN;
+  float tempC  = NAN;
+  // Solo el BNO055 expone Eulers ya fusionados.
+  float bno_yaw = NAN, bno_pitch = NAN, bno_roll = NAN;
+
 #if SENSOR_DRIVER == L3G_LSM303
   sensors_event_t ae, me;
-  float grx, gry, grz;
-  l3gRead(grx, gry, grz);
+  l3gRead(gx_rad, gy_rad, gz_rad);
   accelSensor.getEvent(&ae);
   magSensor.getEvent(&me);
-
-  float gx_dps = radToDeg(grx - gx_bias);
-  float gy_dps = radToDeg(gry - gy_bias);
-  float gz_dps = radToDeg(grz - gz_bias);
-
-  computeAngularAccel(gx_dps, gy_dps, gz_dps, 1.0f / SAMPLE_RATE_HZ);
-  lastGyroDpsX = gx_dps; lastGyroDpsY = gy_dps; lastGyroDpsZ = gz_dps;
-  linAccX = ae.acceleration.x; linAccY = ae.acceleration.y; linAccZ = ae.acceleration.z;
-  // Mag crudo (sin calibración hard/soft-iron) para que el CSV preserve los
-  // datos sin pérdida. La fusión usa los calibrados por separado.
-  lastMagX = me.magnetic.x; lastMagY = me.magnetic.y; lastMagZ = me.magnetic.z;
-  lastTempC = 0.0f / 0.0f;  // LSM303 no expone temperatura por API Adafruit
-
-  float mx = (me.magnetic.x - mx_off) * mx_scl;
-  float my = (me.magnetic.y - my_off) * my_scl;
-  float mz = (me.magnetic.z - mz_off) * mz_scl;
-  (void)mx; (void)my; (void)mz;
-  // 6DOF (sin mag): este módulo LSM303DLHC tiene el eje Z saturado; usar IMU.
-  filter.updateIMU(gx_dps, gy_dps, gz_dps,
-                   ae.acceleration.x, ae.acceleration.y, ae.acceleration.z);
+  ax_ms2 = ae.acceleration.x; ay_ms2 = ae.acceleration.y; az_ms2 = ae.acceleration.z;
+  mx_uT = me.magnetic.x; my_uT = me.magnetic.y; mz_uT = me.magnetic.z;
 
 #elif SENSOR_DRIVER == ICM_42688
-  float grx=0, gry=0, grz=0, ax=0, ay=0, az=0;
-  icmRead(grx, gry, grz, ax, ay, az);
-  float gx_dps = radToDeg(grx - gx_bias);
-  float gy_dps = radToDeg(gry - gy_bias);
-  float gz_dps = radToDeg(grz - gz_bias);
-  computeAngularAccel(gx_dps, gy_dps, gz_dps, 1.0f / SAMPLE_RATE_HZ);
-  lastGyroDpsX = gx_dps; lastGyroDpsY = gy_dps; lastGyroDpsZ = gz_dps;
-  linAccX = ax; linAccY = ay; linAccZ = az;
-  lastMagX = lastMagY = lastMagZ = 0.0f / 0.0f;  // ICM-42688 no tiene mag
-  lastTempC = 0.0f / 0.0f;
-  filter.updateIMU(gx_dps, gy_dps, gz_dps, ax, ay, az);
+  icmRead(gx_rad, gy_rad, gz_rad, ax_ms2, ay_ms2, az_ms2);
+  // Sin magnetómetro físico; los ejes mag quedan NaN.
 
 #elif SENSOR_DRIVER == MPU9250
-  float grx=0, gry=0, grz=0, ax=0, ay=0, az=0, mx=0, my=0, mz=0;
-  mpuRead(grx, gry, grz, ax, ay, az, mx, my, mz);
-  float gx_dps = radToDeg(grx - gx_bias);
-  float gy_dps = radToDeg(gry - gy_bias);
-  float gz_dps = radToDeg(grz - gz_bias);
-  computeAngularAccel(gx_dps, gy_dps, gz_dps, 1.0f / SAMPLE_RATE_HZ);
-  lastGyroDpsX = gx_dps; lastGyroDpsY = gy_dps; lastGyroDpsZ = gz_dps;
-  linAccX = ax; linAccY = ay; linAccZ = az;
-  lastMagX = mx; lastMagY = my; lastMagZ = mz;  // AK8963 raw (µT)
-  lastTempC = 0.0f / 0.0f;
-  // Magnetómetro disponible: usar fusión 9-DOF si la calibración del MAG está hecha.
-  float mxc = (mx - mx_off) * mx_scl;
-  float myc = (my - my_off) * my_scl;
-  float mzc = (mz - mz_off) * mz_scl;
-  filter.update(gx_dps, gy_dps, gz_dps, ax, ay, az, mxc, myc, mzc);
+  mpuRead(gx_rad, gy_rad, gz_rad, ax_ms2, ay_ms2, az_ms2, mx_uT, my_uT, mz_uT);
 
 #elif SENSOR_DRIVER == BNO055
-  // BNO055 hace su propia fusión: leemos eulers directamente y no usamos
-  // Madgwick. Forzamos los offsets de orientación a través de los eulers ya
-  // calculados por el BNO. El campo gyro_dps sigue siendo crudo (post-bias).
-  float yaw_d=0, roll_d=0, pitch_d=0;
-  float grx=0, gry=0, grz=0, ax=0, ay=0, az=0;
-  bnoRead(yaw_d, roll_d, pitch_d, grx, gry, grz, ax, ay, az);
-  float gx_dps = radToDeg(grx - gx_bias);
-  float gy_dps = radToDeg(gry - gy_bias);
-  float gz_dps = radToDeg(grz - gz_bias);
+  bnoRead(bno_yaw, bno_roll, bno_pitch, gx_rad, gy_rad, gz_rad, ax_ms2, ay_ms2, az_ms2);
+  // El BNO055 tiene mag interno pero la fusión Bosch ya lo usó. No lo
+  // exponemos crudo para no sumar lecturas I2C (pendiente si se necesita).
+
+#elif SENSOR_DRIVER == MPU_6050
+  mpu6050Read(gx_rad, gy_rad, gz_rad, ax_ms2, ay_ms2, az_ms2);
+  // MPU-6050 sin magnetómetro; mag_uT queda NaN.
+
+#elif SENSOR_DRIVER == ITG_ADXL_HMC
+  itgRead(gx_rad, gy_rad, gz_rad);
+  adxlReadAccel(ax_ms2, ay_ms2, az_ms2);
+  // Si HMC no respondió al init, hmcReadMag falla → mag queda NaN y la
+  // fusión cae a 6-DOF automáticamente.
+  if (!hmcReadMag(mx_uT, my_uT, mz_uT)) { mx_uT = my_uT = mz_uT = NAN; }
+#endif
+
+  // Bias + conversión a °/s
+  float gx_dps = radToDeg(gx_rad - gx_bias);
+  float gy_dps = radToDeg(gy_rad - gy_bias);
+  float gz_dps = radToDeg(gz_rad - gz_bias);
+
   computeAngularAccel(gx_dps, gy_dps, gz_dps, 1.0f / SAMPLE_RATE_HZ);
+
+  // Estado global expuesto a emitIMU(): los NaN se serializan tal cual.
   lastGyroDpsX = gx_dps; lastGyroDpsY = gy_dps; lastGyroDpsZ = gz_dps;
-  linAccX = ax; linAccY = ay; linAccZ = az;
-  // El BNO055 tiene mag interno y la fusión ya lo usa; aún no lo exponemos
-  // crudo para evitar lecturas I2C extra. Pendiente si se necesita en el CSV.
-  lastMagX = lastMagY = lastMagZ = 0.0f / 0.0f;
-  lastTempC = 0.0f / 0.0f;
-  // El BNO055 reporta heading [0,360); convertimos a [-180,180] para mantener
-  // la convención de Madgwick del resto del firmware.
-  if (yaw_d > 180.0f) yaw_d -= 360.0f;
-  // Truqueamos Madgwick para reportar estos eulers sin volver a fusionar:
-  // emitIMU() lee filter.getYaw/Pitch/Roll, así que feedeamos una rotación
-  // congruente. Para no reimplementar todo el pipeline, hacemos un init/skip:
-  // efectivamente usamos los eulers del BNO sobrescribiendo offsets.
-  yaw_off   = filter.getYaw()   - yaw_d;
-  pitch_off = filter.getPitch() - pitch_d;
-  roll_off  = filter.getRoll()  - roll_d;
-  // Igual alimentamos Madgwick para mantener la API. La precisión real viene
-  // de los offsets que acabamos de sincronizar contra los eulers del BNO.
-  filter.updateIMU(gx_dps, gy_dps, gz_dps, ax, ay, az);
+  linAccX = ax_ms2; linAccY = ay_ms2; linAccZ = az_ms2;
+  lastMagX = mx_uT;  lastMagY = my_uT;  lastMagZ = mz_uT;
+  lastTempC = tempC;
+
+  // Fusión genérica: 9-DOF si los 3 ejes mag son finitos, 6-DOF si alguno
+  // es NaN. La calibración hard/soft-iron se aplica solo cuando hay datos.
+  bool mag_ok = isfinite(mx_uT) && isfinite(my_uT) && isfinite(mz_uT);
+  if (mag_ok) {
+    float mxc = (mx_uT - mx_off) * mx_scl;
+    float myc = (my_uT - my_off) * my_scl;
+    float mzc = (mz_uT - mz_off) * mz_scl;
+    filter.update(gx_dps, gy_dps, gz_dps, ax_ms2, ay_ms2, az_ms2, mxc, myc, mzc);
+  } else {
+    filter.updateIMU(gx_dps, gy_dps, gz_dps, ax_ms2, ay_ms2, az_ms2);
+  }
+
+#if SENSOR_DRIVER == BNO055
+  // El BNO055 fusionó por su cuenta. Sincronizamos los offsets para que
+  // filter.getYaw/Pitch/Roll - off devuelva los eulers internos del chip,
+  // que son más precisos que Madgwick sobre los crudos. La llamada a
+  // filter.updateIMU/update de arriba mantiene el estado interno coherente.
+  if (bno_yaw > 180.0f) bno_yaw -= 360.0f;
+  yaw_off   = filter.getYaw()   - bno_yaw;
+  pitch_off = filter.getPitch() - bno_pitch;
+  roll_off  = filter.getRoll()  - bno_roll;
 #endif
 }
 
@@ -885,7 +1236,9 @@ void handleCommand(String command) {
   } else if (command == "IMU OFF") {
     start_imu = false;
   } else if (command == "IMU CAL") {
-    calibrateIMU();
+    calibrateIMU(false);
+  } else if (command == "IMU CAL FORCE") {
+    calibrateIMU(true);
   } else if (command == "IMU CLR") {
     clearImuCal();
   } else if (command == "IMU STATUS") {
@@ -934,6 +1287,36 @@ void handleCommand(String command) {
     // firmware ya inicializado (perdieron el banner de boot).
     Serial.print("VERSION ");
     Serial.println(FW_VERSION_STRING);
+  } else if (command == "SENSOR") {
+    // Re-emite el banner Gyro WHO_AM_I para clientes que perdieron el del boot.
+#if SENSOR_DRIVER == L3G_LSM303
+    scanGyroWhoAmI();
+#elif SENSOR_DRIVER == ICM_42688
+    int who = readReg8(icmAddr, ICM_REG_WHO_AM_I);
+    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(icmAddr, HEX);
+    Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
+    Serial.print(who, HEX); Serial.println(" (ICM-42688)");
+#elif SENSOR_DRIVER == MPU9250
+    int who = readReg8(mpuAddr, MPU_REG_WHO_AM_I);
+    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(mpuAddr, HEX);
+    Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
+    Serial.print(who, HEX); Serial.println(" (MPU9250)");
+#elif SENSOR_DRIVER == BNO055
+    int who = readReg8(bnoAddr, BNO_REG_CHIP_ID);
+    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(bnoAddr, HEX);
+    Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
+    Serial.print(who, HEX); Serial.println(" (BNO055)");
+#elif SENSOR_DRIVER == MPU_6050
+    int who = readReg8(mpu6050Addr, MPU6050_REG_WHO_AM_I);
+    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(mpu6050Addr, HEX);
+    Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
+    Serial.print(who, HEX); Serial.println(" (MPU-6050)");
+#elif SENSOR_DRIVER == ITG_ADXL_HMC
+    int who = readReg8(itgAddr, ITG_REG_WHO_AM_I);
+    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(itgAddr, HEX);
+    Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
+    Serial.print(who, HEX); Serial.println(" (ITG-3205)");
+#endif
   } else if (command == "RESET") {
     Serial.println("Reiniciando...");
     delay(10);
@@ -942,9 +1325,54 @@ void handleCommand(String command) {
   // OLED/LED bar retirados; comandos O*/BAR* se ignoran.
 }
 
-void calibrateIMU() {
-  const int numSamples = 200;            // 1 s @ 200 Hz
-  const float MOTION_LIMIT_DPS = 3.0f;   // std-dev por eje permitida (°/s)
+// Umbral de movimiento permitido durante CAL, en °/s, según el ruido típico
+// del sensor. Pasar el umbral significa "está moviendo el sensor, repetir CAL".
+//   L3G:         ruido ~0.5-1 °/s → umbral 3 dps (margen ×3-6).
+//   ICM-42688:   ruido <0.1 °/s   → umbral 0.5 dps (sobra margen).
+//   MPU9250:     ruido ~0.2 °/s   → umbral 0.8 dps.
+//   BNO055:      bypass (no aplicamos bias propio; reportamos sd a título informativo).
+#if SENSOR_DRIVER == L3G_LSM303
+  static const float CAL_MOTION_LIMIT_DPS = 3.0f;
+  static const uint32_t CAL_SAMPLE_DELAY_MS = 5;   // 200 Hz → coincide con ODR
+#elif SENSOR_DRIVER == ICM_42688
+  static const float CAL_MOTION_LIMIT_DPS = 0.5f;
+  static const uint32_t CAL_SAMPLE_DELAY_MS = 5;   // ICM corre a 1 kHz → 200 Hz CAL OK
+#elif SENSOR_DRIVER == MPU9250
+  static const float CAL_MOTION_LIMIT_DPS = 0.8f;
+  static const uint32_t CAL_SAMPLE_DELAY_MS = 5;
+#elif SENSOR_DRIVER == BNO055
+  static const float CAL_MOTION_LIMIT_DPS = 1.5f;  // solo informativo
+  static const uint32_t CAL_SAMPLE_DELAY_MS = 10;  // BNO en NDOF corre a 100 Hz
+#elif SENSOR_DRIVER == MPU_6050
+  static const float CAL_MOTION_LIMIT_DPS = 1.0f;  // ruido típico 0.3 °/s
+  static const uint32_t CAL_SAMPLE_DELAY_MS = 5;
+#elif SENSOR_DRIVER == ITG_ADXL_HMC
+  static const float CAL_MOTION_LIMIT_DPS = 1.5f;  // ITG-3205, ruido ~0.5 °/s
+  static const uint32_t CAL_SAMPLE_DELAY_MS = 5;
+#endif
+
+// Validaciones aceptables del accel durante el segundo de quietud:
+//   - Módulo medio ≈ 9.80 m/s² (gravedad). Permite ±0.5 (sensor inclinado OK).
+//   - σ del módulo < 0.10 m/s² → si la mano tiembla, el módulo varía.
+static const float CAL_ACCEL_NOMINAL_MS2 = 9.80665f;
+static const float CAL_ACCEL_TOL_MS2     = 0.5f;
+static const float CAL_ACCEL_SD_LIMIT    = 0.10f;
+
+void calibrateIMU(bool force) {
+  // Pre-warm-up: el gyro auto-calienta y el bias deriva en el primer minuto.
+  // CAL prematura captura un bias que cambiará. force=true bypasea (debug).
+  uint32_t ms_since_boot = millis();
+  if (!force && ms_since_boot < CAL_PREHEAT_MS) {
+    Serial.print("IMU CAL fail preheat remain_ms=");
+    Serial.print((unsigned long)(CAL_PREHEAT_MS - ms_since_boot));
+    Serial.print(" (boot_ms=");
+    Serial.print((unsigned long)ms_since_boot);
+    Serial.println(") - usar IMU CAL FORCE para saltar");
+    return;
+  }
+
+  // Mantener 1 s de muestreo independiente del ODR del sensor.
+  const int numSamples = (int)(1000 / CAL_SAMPLE_DELAY_MS);
 
   bool prev_start = start_imu;
   start_imu = false;
@@ -953,50 +1381,134 @@ void calibrateIMU() {
 
   double sx = 0, sy = 0, sz = 0;
   double sxx = 0, syy = 0, szz = 0;
+  // Acumuladores de validación del accel.
+  double sa = 0, saa = 0;
+  int    accelN = 0;
+  // Detector de muestras gyro repetidas bit a bit (ODR sub-stated → varianza falsa).
+  int    repeats = 0;
+  int16_t prevR[3] = { 0, 0, 0 };
+  bool    hasPrevR = false;
 
   for (int i = 0; i < numSamples; i++) {
     float grx = 0, gry = 0, grz = 0;
+    float ax = NAN, ay = NAN, az = NAN;
 #if SENSOR_DRIVER == L3G_LSM303
     l3gRead(grx, gry, grz);
+    sensors_event_t ae; accelSensor.getEvent(&ae);
+    ax = ae.acceleration.x; ay = ae.acceleration.y; az = ae.acceleration.z;
 #elif SENSOR_DRIVER == ICM_42688
-    float ax, ay, az; icmRead(grx, gry, grz, ax, ay, az);
+    icmRead(grx, gry, grz, ax, ay, az);
 #elif SENSOR_DRIVER == MPU9250
-    float ax, ay, az, mx, my, mz; mpuRead(grx, gry, grz, ax, ay, az, mx, my, mz);
+    float mx_dummy, my_dummy, mz_dummy;
+    mpuRead(grx, gry, grz, ax, ay, az, mx_dummy, my_dummy, mz_dummy);
 #elif SENSOR_DRIVER == BNO055
-    float yd, rd, pd, ax, ay, az; bnoRead(yd, rd, pd, grx, gry, grz, ax, ay, az);
+    uint8_t b[6];
+    if (bnoReadBytes(BNO_REG_GYR_DATA, b, 6)) {
+      int16_t rgx = (int16_t)((b[1] << 8) | b[0]);
+      int16_t rgy = (int16_t)((b[3] << 8) | b[2]);
+      int16_t rgz = (int16_t)((b[5] << 8) | b[4]);
+      if (hasPrevR && rgx == prevR[0] && rgy == prevR[1] && rgz == prevR[2]) repeats++;
+      prevR[0] = rgx; prevR[1] = rgy; prevR[2] = rgz; hasPrevR = true;
+      grx = rgx * BNO_GYR_SENS_DPS * 0.0174532925f;
+      gry = rgy * BNO_GYR_SENS_DPS * 0.0174532925f;
+      grz = rgz * BNO_GYR_SENS_DPS * 0.0174532925f;
+    }
+    if (bnoReadBytes(BNO_REG_ACC_DATA, b, 6)) {
+      int16_t rx = (int16_t)((b[1] << 8) | b[0]);
+      int16_t ry = (int16_t)((b[3] << 8) | b[2]);
+      int16_t rz = (int16_t)((b[5] << 8) | b[4]);
+      ax = rx * BNO_ACC_SENS_MS2; ay = ry * BNO_ACC_SENS_MS2; az = rz * BNO_ACC_SENS_MS2;
+    }
+#elif SENSOR_DRIVER == MPU_6050
+    mpu6050Read(grx, gry, grz, ax, ay, az);
+#elif SENSOR_DRIVER == ITG_ADXL_HMC
+    itgRead(grx, gry, grz);
+    adxlReadAccel(ax, ay, az);
 #endif
-    sx  += grx;  sy  += gry;  sz  += grz;
+    sx += grx; sy += gry; sz += grz;
     sxx += (double)grx * grx;
     syy += (double)gry * gry;
     szz += (double)grz * grz;
-    delay(5);
+    if (isfinite(ax) && isfinite(ay) && isfinite(az)) {
+      double mag = sqrt((double)ax*ax + (double)ay*ay + (double)az*az);
+      sa += mag; saa += mag * mag; accelN++;
+    }
+    delay(CAL_SAMPLE_DELAY_MS);
   }
 
-  float mx = (float)(sx / numSamples);
-  float my = (float)(sy / numSamples);
-  float mz = (float)(sz / numSamples);
-  float vx = (float)(sxx / numSamples) - mx * mx;
-  float vy = (float)(syy / numSamples) - my * my;
-  float vz = (float)(szz / numSamples) - mz * mz;
+  float bx = (float)(sx / numSamples);
+  float by = (float)(sy / numSamples);
+  float bz = (float)(sz / numSamples);
+  float vx = (float)(sxx / numSamples) - bx * bx;
+  float vy = (float)(syy / numSamples) - by * by;
+  float vz = (float)(szz / numSamples) - bz * bz;
   if (vx < 0) vx = 0; if (vy < 0) vy = 0; if (vz < 0) vz = 0;
   float sdx = radToDeg(sqrtf(vx));
   float sdy = radToDeg(sqrtf(vy));
   float sdz = radToDeg(sqrtf(vz));
   float sdMax = sdx; if (sdy > sdMax) sdMax = sdy; if (sdz > sdMax) sdMax = sdz;
 
-  if (sdMax > MOTION_LIMIT_DPS) {
+  // Estadísticos del accel (si hubo lecturas válidas).
+  float aMag = 0, aSd = 0;
+  if (accelN > 1) {
+    aMag = (float)(sa / accelN);
+    float aVar = (float)(saa / accelN) - aMag * aMag;
+    if (aVar < 0) aVar = 0;
+    aSd = sqrtf(aVar);
+  }
+
+  // --- Razones de fallo, en orden de prioridad ---
+
+  // (a) ODR mal estimado: el chip no entregó muestras nuevas en cada delay.
+  //     Solo BNO055 hace este check explícito (el más expuesto al problema).
+  if (repeats * 100 > numSamples * 30) {
+    Serial.print("IMU CAL fail repeats="); Serial.print(repeats);
+    Serial.print("/"); Serial.print(numSamples);
+    Serial.println(" - ODR del chip menor al esperado");
+    start_imu = prev_start;
+    return;
+  }
+
+  // (b) Movimiento durante el segundo de quietud (gyro stddev).
+  if (sdMax > CAL_MOTION_LIMIT_DPS) {
     Serial.print("IMU CAL fail motion sd=");
     Serial.print(sdx, 3); Serial.print(",");
     Serial.print(sdy, 3); Serial.print(",");
     Serial.print(sdz, 3);
+    Serial.print(" limit="); Serial.print(CAL_MOTION_LIMIT_DPS, 2);
     Serial.println(" dps");
     start_imu = prev_start;
     return;
   }
 
-  gx_bias = mx;
-  gy_bias = my;
-  gz_bias = mz;
+  // (c) Gravedad anómala: sensor no está soportado por gravedad, está en
+  //     caída libre, o el accel está dañado.
+  if (accelN > 0 && fabs(aMag - CAL_ACCEL_NOMINAL_MS2) > CAL_ACCEL_TOL_MS2) {
+    Serial.print("IMU CAL fail gravity mag="); Serial.print(aMag, 3);
+    Serial.print(" expected~"); Serial.print(CAL_ACCEL_NOMINAL_MS2, 2);
+    Serial.println(" m/s2");
+    start_imu = prev_start;
+    return;
+  }
+
+  // (d) Accel ruidoso: la mano tiembla aunque el gyro pase. Vibración mecánica.
+  if (accelN > 1 && aSd > CAL_ACCEL_SD_LIMIT) {
+    Serial.print("IMU CAL fail accel_noise sd=");
+    Serial.print(aSd, 4); Serial.print(" limit=");
+    Serial.print(CAL_ACCEL_SD_LIMIT, 2); Serial.println(" m/s2");
+    start_imu = prev_start;
+    return;
+  }
+
+  // --- Aplicar resultado ---
+#if SENSOR_DRIVER == BNO055
+  // BNO055: la fusión Bosch ya descuenta bias. No aplicar el nuestro.
+  gx_bias = gy_bias = gz_bias = 0.0f;
+#else
+  gx_bias = bx;
+  gy_bias = by;
+  gz_bias = bz;
+#endif
 
   yaw_off   = filter.getYaw();
   pitch_off = filter.getPitch();
@@ -1005,6 +1517,37 @@ void calibrateIMU() {
   prevAngleX = prevAngleY = prevAngleZ = 0;
   offsetX = offsetY = offsetZ = 0;
 
+  // Persistir snapshot estructurado para trazabilidad.
+  float tempC = NAN;
+#if SENSOR_DRIVER == L3G_LSM303
+  tempC = l3gReadTempC();
+#elif SENSOR_DRIVER == ICM_42688
+  tempC = icmReadTempC();
+#elif SENSOR_DRIVER == MPU9250
+  tempC = mpuReadTempC();
+#elif SENSOR_DRIVER == BNO055
+  tempC = bnoReadTempC();
+#elif SENSOR_DRIVER == MPU_6050
+  tempC = mpu6050ReadTempC();
+#elif SENSOR_DRIVER == ITG_ADXL_HMC
+  tempC = itgReadTempC();
+#endif
+  calState.schema_version = 1;
+  calState.bias_xyz[0] = gx_bias;
+  calState.bias_xyz[1] = gy_bias;
+  calState.bias_xyz[2] = gz_bias;
+  calState.sd_dps_xyz[0] = sdx;
+  calState.sd_dps_xyz[1] = sdy;
+  calState.sd_dps_xyz[2] = sdz;
+  calState.accel_mag_ms2 = aMag;
+  calState.accel_sd_ms2  = aSd;
+  calState.temp_c        = tempC;
+  calState.ts_ms         = ms_since_boot;
+  calState.fw_hash       = crc16Helper(FW_VERSION_STRING);
+  calState.sensor_driver = (uint32_t)SENSOR_DRIVER;
+  saveCalState();
+
+  // Reporte textual (compat con clientes existentes).
   Serial.print("IMU CAL done bias=");
   Serial.print(gx_bias, 5); Serial.print(",");
   Serial.print(gy_bias, 5); Serial.print(",");
@@ -1018,6 +1561,21 @@ void calibrateIMU() {
   Serial.print(pitch_off, 2); Serial.print(",");
   Serial.println(roll_off, 2);
 
+  // Reporte JSON estructurado (cliente moderno lo parsea para sensor_profile.json).
+  Serial.print("IMU CAL JSON {");
+  Serial.print("\"bias_dps\":["); Serial.print(radToDeg(gx_bias), 5); Serial.print(",");
+  Serial.print(radToDeg(gy_bias), 5); Serial.print(","); Serial.print(radToDeg(gz_bias), 5); Serial.print("],");
+  Serial.print("\"sd_dps\":["); Serial.print(sdx, 3); Serial.print(",");
+  Serial.print(sdy, 3); Serial.print(","); Serial.print(sdz, 3); Serial.print("],");
+  Serial.print("\"accel_mag_ms2\":"); Serial.print(aMag, 3); Serial.print(",");
+  Serial.print("\"accel_sd_ms2\":"); Serial.print(aSd, 4); Serial.print(",");
+  Serial.print("\"temp_c\":");
+  if (isfinite(tempC)) Serial.print(tempC, 2); else Serial.print("null");
+  Serial.print(",\"samples\":"); Serial.print(numSamples);
+  Serial.print(",\"ts_ms\":"); Serial.print((unsigned long)ms_since_boot);
+  Serial.print(",\"odr_ms\":"); Serial.print((unsigned long)CAL_SAMPLE_DELAY_MS);
+  Serial.println("}");
+
   start_imu = prev_start;
 }
 
@@ -1026,12 +1584,17 @@ void clearImuCal() {
   yaw_off = pitch_off = roll_off = 0.0f;
   prevAngleX = prevAngleY = prevAngleZ = 0;
   offsetX = offsetY = offsetZ = 0;
+  // Borrar también el snapshot persistido para que un nuevo boot no rehidrate
+  // el bias viejo.
+  calState = {};
+  prefs.begin("simhit", false);
+  prefs.remove("cal");
+  prefs.end();
   Serial.println("IMU CLR done");
 }
 
 void printImuStatus() {
-  bool calibrated = (gx_bias != 0.0f || gy_bias != 0.0f || gz_bias != 0.0f
-                  || yaw_off != 0.0f || pitch_off != 0.0f || roll_off != 0.0f);
+  bool calibrated = (calState.schema_version >= 1);
   Serial.print("IMU STATUS ");
   Serial.print(calibrated ? "calibrated" : "uncalibrated");
   Serial.print(" bias=");
@@ -1044,6 +1607,24 @@ void printImuStatus() {
   Serial.print(roll_off, 2);
   Serial.print(" emit=");
   Serial.println(start_imu ? "ON" : "OFF");
+
+  // Reporte JSON de la CAL persistida — fuente de verdad para sensor_profile.json.
+  if (calibrated) {
+    Serial.print("IMU STATUS JSON {");
+    Serial.print("\"bias_dps\":["); Serial.print(radToDeg(calState.bias_xyz[0]), 5); Serial.print(",");
+    Serial.print(radToDeg(calState.bias_xyz[1]), 5); Serial.print(","); Serial.print(radToDeg(calState.bias_xyz[2]), 5); Serial.print("],");
+    Serial.print("\"sd_dps\":["); Serial.print(calState.sd_dps_xyz[0], 3); Serial.print(",");
+    Serial.print(calState.sd_dps_xyz[1], 3); Serial.print(","); Serial.print(calState.sd_dps_xyz[2], 3); Serial.print("],");
+    Serial.print("\"accel_mag_ms2\":"); Serial.print(calState.accel_mag_ms2, 3); Serial.print(",");
+    Serial.print("\"accel_sd_ms2\":"); Serial.print(calState.accel_sd_ms2, 4); Serial.print(",");
+    Serial.print("\"temp_c\":");
+    if (isfinite(calState.temp_c)) Serial.print(calState.temp_c, 2); else Serial.print("null");
+    Serial.print(",\"cal_ts_ms\":"); Serial.print((unsigned long)calState.ts_ms);
+    Serial.print(",\"now_ms\":"); Serial.print((unsigned long)millis());
+    Serial.print(",\"fw_hash\":\"0x"); Serial.print(calState.fw_hash, HEX);
+    Serial.print("\",\"driver\":"); Serial.print((unsigned long)calState.sensor_driver);
+    Serial.println("}");
+  }
 }
 
 

@@ -29,6 +29,20 @@
       "families": ["BNO055"],
       "who_am_i": ["0xA0"],
       "validated": false
+    },
+    {
+      "slug": "mpu6050",
+      "label": "MPU-6050 (sin testear)",
+      "families": ["MPU-6050"],
+      "who_am_i": ["0x68"],
+      "validated": false
+    },
+    {
+      "slug": "itg-adxl-hmc",
+      "label": "HW-579 (ITG-3205 + ADXL345 + HMC5883L, sin testear)",
+      "families": ["ITG-3205"],
+      "who_am_i": ["0x68", "0x69"],
+      "validated": false
     }
   ],
   "latest": {

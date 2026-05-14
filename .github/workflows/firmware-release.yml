@@ -49,6 +49,12 @@ jobs:
           - slug: bno055
             macro: BNO055
             label: 'Compilar — BNO055 [sin testear con hardware]'
+          - slug: mpu6050
+            macro: MPU_6050
+            label: 'Compilar — MPU-6050 [sin testear con hardware]'
+          - slug: itg-adxl-hmc
+            macro: ITG_ADXL_HMC
+            label: 'Compilar — HW-579 (ITG-3205 + ADXL345 + HMC5883L) [sin testear]'
 
     env:
       FQBN: esp32:esp32:XIAO_ESP32C3
@@ -178,6 +184,8 @@ jobs:
             | ICM-42688 | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-icm-42688.merged.bin` | ⚠ sin testear |
             | MPU-9250 + AK8963 | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-mpu9250.merged.bin` | ⚠ sin testear |
             | BNO055 (fusión interna) | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-bno055.merged.bin` | ⚠ sin testear |
+            | MPU-6050 (6-DOF) | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-mpu6050.merged.bin` | ⚠ sin testear |
+            | HW-579 (ITG-3205 + ADXL345 + HMC5883L) | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-itg-adxl-hmc.merged.bin` | ⚠ sin testear |
 
             **Board:** `${{ env.FQBN }}` (ESP32-C3 SuperMini)
 
