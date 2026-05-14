@@ -44,8 +44,7 @@
         "image_type": "merged",
         "flash_address": 0,
         "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.1.0/simhit-fw-1.1.0-esp32c3-l3g-lsm303.merged.bin",
-        "sha256": null,
-        "size_bytes": null
+        "sha256": "54580d4bdd1763465ecf28c720d2ed399f862d575bbb64ee72c0bcbba328380d"
       },
       {
         "board": "esp32-c3-supermini",
@@ -53,7 +52,7 @@
         "image_type": "merged",
         "flash_address": 0,
         "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.1.0/simhit-fw-1.1.0-esp32c3-icm-42688.merged.bin",
-        "sha256": null
+        "sha256": "60c08d28a5e1a6984b90662e8a501bb2fa9beb4aac3ca4a27b3605c79410cb2f"
       },
       {
         "board": "esp32-c3-supermini",
@@ -61,7 +60,7 @@
         "image_type": "merged",
         "flash_address": 0,
         "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.1.0/simhit-fw-1.1.0-esp32c3-mpu9250.merged.bin",
-        "sha256": null
+        "sha256": "bac1b6351f4d84581d6eb9a0df8fa327d95e13eefe2979dd1cf17925102743b8"
       },
       {
         "board": "esp32-c3-supermini",
@@ -69,7 +68,7 @@
         "image_type": "merged",
         "flash_address": 0,
         "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.1.0/simhit-fw-1.1.0-esp32c3-bno055.merged.bin",
-        "sha256": null
+        "sha256": "24c3d1fc6ed36ff1f97a1b3a8cabefc0c6dbc32802983496b9fd18e4c944be72"
       }
     ]
   },
