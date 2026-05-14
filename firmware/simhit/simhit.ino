@@ -570,7 +570,11 @@ static const AxesConfigFW AXES_DEFAULT = {
 AxesConfigFW axesConfig = AXES_DEFAULT;
 static const char AXIS_NAME[3] = {'x', 'y', 'z'};
 
-bool parseAxes12(const String& s, AxesConfigFW* out) {
+// parseAxes12: parsea el formato compacto y, si es válido, asigna al global
+// axesConfig. No toma struct por puntero/referencia para evitar problemas
+// con el auto-prototype del preprocesador de Arduino, que generaría una
+// declaración arriba de la struct AxesConfigFW.
+bool parseAxes12(const String& s) {
   if (s.length() != 12) return false;
   AxisMapFW m[6];
   for (int i = 0; i < 6; i++) {
@@ -584,27 +588,25 @@ bool parseAxes12(const String& s, AxesConfigFW* out) {
     else if (sg == '-') m[i].sign = -1;
     else return false;
   }
-  out->pose_yaw   = m[0]; out->pose_pitch = m[1]; out->pose_roll = m[2];
-  out->gyro_yaw   = m[3]; out->gyro_pitch = m[4]; out->gyro_roll = m[5];
+  axesConfig.pose_yaw   = m[0]; axesConfig.pose_pitch = m[1]; axesConfig.pose_roll = m[2];
+  axesConfig.gyro_yaw   = m[3]; axesConfig.gyro_pitch = m[4]; axesConfig.gyro_roll = m[5];
   return true;
 }
 
-void printAxisJson(const char* label, const AxisMapFW& m, bool trailingComma) {
-  Serial.print("\""); Serial.print(label);
-  Serial.print("\":{\"axis\":\""); Serial.print(AXIS_NAME[m.axis]);
-  Serial.print("\",\"sign\":"); Serial.print((int)m.sign);
-  Serial.print("}"); if (trailingComma) Serial.print(",");
-}
-
 void printAxesJson() {
+  // Inline para no pasar AxisMapFW por referencia a un helper (mismo motivo
+  // que parseAxes12: el auto-prototype de Arduino no conoce la struct).
+  const AxisMapFW* arr = (const AxisMapFW*)&axesConfig;
+  const char* LABELS[6] = {"yaw", "pitch", "roll", "yaw", "pitch", "roll"};
   Serial.print("AXES JSON {\"pose\":{");
-  printAxisJson("yaw",   axesConfig.pose_yaw,   true);
-  printAxisJson("pitch", axesConfig.pose_pitch, true);
-  printAxisJson("roll",  axesConfig.pose_roll,  false);
-  Serial.print("},\"gyro\":{");
-  printAxisJson("yaw",   axesConfig.gyro_yaw,   true);
-  printAxisJson("pitch", axesConfig.gyro_pitch, true);
-  printAxisJson("roll",  axesConfig.gyro_roll,  false);
+  for (int i = 0; i < 6; i++) {
+    if (i == 3) Serial.print("},\"gyro\":{");
+    Serial.print("\""); Serial.print(LABELS[i]);
+    Serial.print("\":{\"axis\":\""); Serial.print(AXIS_NAME[arr[i].axis]);
+    Serial.print("\",\"sign\":"); Serial.print((int)arr[i].sign);
+    Serial.print("}");
+    if (i != 2 && i != 5) Serial.print(",");
+  }
   Serial.println("}}");
 }
 
@@ -1632,9 +1634,7 @@ void handleCommand(String command) {
   } else if (command.startsWith("AXES SET ")) {
     String payload = command.substring(9);
     payload.trim();
-    AxesConfigFW parsed;
-    if (parseAxes12(payload, &parsed)) {
-      axesConfig = parsed;
+    if (parseAxes12(payload)) {
       saveAxes();
       printAxesJson();
     } else {
