@@ -12,7 +12,38 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { serial } from './serial.svelte';
-import { firmware } from './firmware.svelte';
+import { firmware, type FirmwareArtifact, type FirmwareManifest } from './firmware.svelte';
+
+// Resuelve qué .bin descargar dado el sensor objetivo. Prefiere merged
+// (escritura al addr 0x0 incluye bootloader + particiones). Si no encuentra
+// uno para el slug exacto, cae al sensor default; finalmente al primer
+// artifact disponible.
+function pickArtifact(manifest: FirmwareManifest, preferredSlug?: string): FirmwareArtifact | null {
+  const artifacts = manifest.latest.artifacts;
+  const tryFind = (slug: string | undefined) => {
+    if (!slug) return null;
+    return artifacts.find((a) => a.sensor === slug && a.image_type === 'merged')
+        ?? artifacts.find((a) => a.sensor === slug)
+        ?? null;
+  };
+  // 1) Slug explícito
+  let a = tryFind(preferredSlug);
+  if (a) return a;
+  // 2) Familia del firmware actualmente corriendo (mapeo familia→slug)
+  const detectedFamily = serial.detectedSensor?.family;
+  if (detectedFamily) {
+    const supported = manifest.supported_sensors ?? [];
+    const match = supported.find((s) => s.families?.includes(detectedFamily));
+    a = tryFind(match?.slug);
+    if (a) return a;
+  }
+  // 3) Sensor default declarado en el manifest
+  const def = (manifest.supported_sensors ?? []).find((s) => s.default);
+  a = tryFind(def?.slug);
+  if (a) return a;
+  // 4) Cualquier artifact merged; último recurso, cualquiera.
+  return artifacts.find((a) => a.image_type === 'merged') ?? artifacts[0] ?? null;
+}
 
 export type FlashStage = 'idle' | 'downloading' | 'verifying' | 'connecting' | 'writing' | 'resetting' | 'done' | 'error';
 
@@ -62,9 +93,11 @@ class FlashStore {
   }
 
   // Si se pasa `port`, lo usa explícitamente; si no, intenta serial.portPath.
+  // `sensorSlug` fuerza un driver específico cuando lo necesita el usuario
+  // (instalación desde cero, sin firmware previo para autodetectar).
   // Permite flashear dispositivos sin firmware previo (el ROM bootloader del
   // ESP entra al modo descarga vía DTR/RTS sin importar si hay handshake).
-  async start(port?: string) {
+  async start(port?: string, sensorSlug?: string) {
     if (this.stage !== 'idle' && this.stage !== 'done' && this.stage !== 'error') {
       throw new Error('Flasheo ya en curso');
     }
@@ -79,10 +112,13 @@ class FlashStore {
       this.fail('Seleccione un puerto USB-Serial.');
       return;
     }
-    const artifact = firmware.manifest.latest.artifacts.find((a) => a.board === 'esp32-c3-supermini' && (a as { image_type?: string }).image_type === 'merged')
-      ?? firmware.manifest.latest.artifacts[0];
+    // Elegir el artifact correcto:
+    //   1) Si el firmware conectado reporta familia de sensor → usar ese slug.
+    //   2) Si no, usar el sensor marcado default en supported_sensors.
+    //   3) Último fallback: primer artifact merged disponible.
+    const artifact = pickArtifact(firmware.manifest, sensorSlug);
     if (!artifact) {
-      this.fail('El manifest no incluye artifacts.');
+      this.fail('El manifest no incluye artifacts compatibles con el sensor detectado.');
       return;
     }
 

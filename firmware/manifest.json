@@ -1,14 +1,24 @@
 {
-  "schema_version": "simhit-fw-manifest-1.0",
+  "schema_version": "simhit-fw-manifest-1.1",
+  "supported_sensors": [
+    {
+      "slug": "l3g-lsm303",
+      "label": "L3G (L3GD20H / L3GD20 / L3G4200D) + LSM303",
+      "families": ["L3GD20H", "L3GD20", "L3G4200D"],
+      "who_am_i": ["0xD7", "0xD4", "0xD3"],
+      "default": true
+    }
+  ],
   "latest": {
     "version": "1.0.0",
     "channel": "stable",
     "released_at": "2026-05-13",
-    "notes": "Versión inicial estampada. Añade banner 'SimHit FW x.y.z' al boot y comando VERSION para query post-conexión.",
+    "notes": "Versión inicial estampada. Añade banner 'SimHit FW 1.0.0' al boot y comando VERSION para query post-conexión.",
     "min_compatible_app": "2026.5.0",
     "artifacts": [
       {
         "board": "esp32-c3-supermini",
+        "sensor": "l3g-lsm303",
         "image_type": "merged",
         "flash_address": 0,
         "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.0.0/simhit-fw-1.0.0-esp32c3.merged.bin",
@@ -17,6 +27,7 @@
       },
       {
         "board": "esp32-c3-supermini",
+        "sensor": "l3g-lsm303",
         "image_type": "app",
         "flash_address": 65536,
         "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.0.0/simhit-fw-1.0.0-esp32c3.bin",

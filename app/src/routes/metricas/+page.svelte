@@ -30,6 +30,16 @@
   let usbPorts = $state<Array<{ port_name: string; vid: number; pid: number; manufacturer: string | null; product: string | null }>>([]);
   let selectedManualPort = $state<string>('');
   let listingPorts = $state(false);
+  // Slug del driver de sensor a instalar. Default: el marcado como default
+  // en el manifest. Solo importa para instalación desde cero (sin firmware
+  // previo); en update el flash.start sin slug autodetecta.
+  let selectedSensorSlug = $state<string>('');
+  $effect(() => {
+    if (!selectedSensorSlug && firmware.manifest) {
+      const def = (firmware.manifest.supported_sensors ?? []).find((s) => s.default);
+      selectedSensorSlug = def?.slug ?? firmware.manifest.supported_sensors?.[0]?.slug ?? '';
+    }
+  });
 
   async function refreshUsbPorts() {
     listingPorts = true;
@@ -520,6 +530,17 @@
                 {/if}
               </select>
             </label>
+
+            {#if firmware.manifest && (firmware.manifest.supported_sensors?.length ?? 0) > 0}
+              <label>
+                <span>Driver de sensor</span>
+                <select bind:value={selectedSensorSlug}>
+                  {#each firmware.manifest.supported_sensors ?? [] as s}
+                    <option value={s.slug}>{s.label}{s.default ? ' — default' : ''}</option>
+                  {/each}
+                </select>
+              </label>
+            {/if}
           </div>
 
           <div class="actions-row">
@@ -528,7 +549,7 @@
             </button>
             <button
               class="primary"
-              onclick={() => flash.start(selectedManualPort)}
+              onclick={() => flash.start(selectedManualPort, selectedSensorSlug || undefined)}
               disabled={!selectedManualPort || !firmware.manifest || (flash.stage !== 'idle' && flash.stage !== 'done' && flash.stage !== 'error')}
             >
               🆕 Flashear en {selectedManualPort || '(seleccione puerto)'}

@@ -16,8 +16,20 @@ const REMOTE_URLS = [
 
 export type FirmwareArtifact = {
   board: string;
+  sensor?: string;          // slug del driver (p.ej. 'l3g-lsm303')
+  image_type?: 'merged' | 'app';
+  flash_address?: number;
   url: string;
   sha256: string | null;
+  size_bytes?: number;
+};
+
+export type SupportedSensor = {
+  slug: string;
+  label: string;
+  families: string[];     // nombres concretos (p.ej. ['L3GD20H','L3GD20','L3G4200D'])
+  who_am_i: string[];
+  default?: boolean;
 };
 
 export type FirmwareManifestEntry = {
@@ -31,6 +43,7 @@ export type FirmwareManifestEntry = {
 
 export type FirmwareManifest = {
   schema_version: string;
+  supported_sensors?: SupportedSensor[];
   latest: FirmwareManifestEntry;
   history: FirmwareManifestEntry[];
 };

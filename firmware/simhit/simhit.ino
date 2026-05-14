@@ -36,6 +36,25 @@
 // manifest del repo.
 #define FW_VERSION_STRING "1.0.0"
 
+// ──────────────────── Selección del driver de sensor ────────────────────
+// La CI pasa -DSENSOR_DRIVER=<MACRO> al compilador para producir un .bin por
+// IMU. Cuando se compila localmente (Arduino IDE) sin pasar el flag, queda
+// el default L3G_LSM303. Para agregar un sensor nuevo:
+//   1) Agregar su macro al bloque #define <NEW> N de abajo.
+//   2) Implementar las funciones del driver con #if SENSOR_DRIVER == <NEW>
+//   3) Agregar la entrada a strategy.matrix.sensor en firmware-release.yml.
+#define L3G_LSM303 1
+// #define ICM_42688  2   // pendiente
+// #define MPU9250    3   // pendiente
+// #define BNO055     4   // pendiente
+
+#ifndef SENSOR_DRIVER
+  #define SENSOR_DRIVER L3G_LSM303
+#endif
+#if SENSOR_DRIVER != L3G_LSM303
+  #error "SENSOR_DRIVER aún no soportado. Implementar el bloque correspondiente en este archivo."
+#endif
+
 #define I2C_SDA_PIN 6
 #define I2C_SCL_PIN 7
 
