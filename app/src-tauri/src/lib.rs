@@ -27,6 +27,7 @@ pub fn run() {
             metrics::capture::stop_capture,
             metrics::sampling::analyze_sampling,
             metrics::allan::analyze_allan_variance,
+            metrics::allan::analyze_allan_in_place,
             metrics::flash::detect_esp_chip,
             metrics::flash::flash_firmware,
             metrics::flash::list_serial_ports,

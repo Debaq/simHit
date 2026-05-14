@@ -40,9 +40,26 @@ pub struct AllanResult {
 #[tauri::command]
 pub fn analyze_allan_variance(config: AllanConfig) -> Result<AllanResult, AnalysisError> {
     let (timestamps, gx, gy, gz) = load_gyro_csv(&config.csv_path)?;
+    compute_allan(&timestamps, &gx, &gy, &gz, config.min_tau_s, config.max_tau_s, config.n_points)
+}
+
+// Núcleo del cómputo: aceptaba el wrapper CSV-based + el endpoint in-place
+// usado por el Allan corto post-CAL. Acá no se hace I/O.
+pub fn compute_allan(
+    timestamps: &[i64],
+    gx: &[f64],
+    gy: &[f64],
+    gz: &[f64],
+    min_tau_s: f64,
+    max_tau_s: f64,
+    n_points: usize,
+) -> Result<AllanResult, AnalysisError> {
     let n = timestamps.len();
     if n < 16 {
         return Err(AnalysisError::new("NotEnoughSamples", "Se necesitan al menos 16 muestras"));
+    }
+    if gx.len() != n || gy.len() != n || gz.len() != n {
+        return Err(AnalysisError::new("ShapeMismatch", "Vectores de longitudes distintas"));
     }
 
     let duration_s = (timestamps[n - 1] - timestamps[0]) as f64 / 1.0e6;
@@ -50,15 +67,15 @@ pub fn analyze_allan_variance(config: AllanConfig) -> Result<AllanResult, Analys
     let tau_0 = 1.0 / fs;
 
     // Generar τ log-espaciado y mapear a cluster sizes m enteros únicos.
-    let lmin = config.min_tau_s.max(tau_0).ln();
-    let lmax = config.max_tau_s.min(duration_s / 2.5).ln();
+    let lmin = min_tau_s.max(tau_0).ln();
+    let lmax = max_tau_s.min(duration_s / 2.5).ln();
     if lmax <= lmin {
         return Err(AnalysisError::new("BadRange", "max_tau_s debe ser > min_tau_s"));
     }
-    let mut ms: Vec<usize> = Vec::with_capacity(config.n_points);
+    let mut ms: Vec<usize> = Vec::with_capacity(n_points);
     let mut seen_last: usize = 0;
-    for i in 0..config.n_points {
-        let tau = (lmin + (lmax - lmin) * (i as f64 / (config.n_points as f64 - 1.0).max(1.0))).exp();
+    for i in 0..n_points {
+        let tau = (lmin + (lmax - lmin) * (i as f64 / (n_points as f64 - 1.0).max(1.0))).exp();
         let m = (tau / tau_0).round() as usize;
         if m >= 1 && m != seen_last && 2 * m < n {
             ms.push(m);
@@ -70,9 +87,9 @@ pub fn analyze_allan_variance(config: AllanConfig) -> Result<AllanResult, Analys
     }
 
     // Sumas acumuladas por eje. theta[0] = 0; theta[i] = Σ_{k<i} ω_k · τ_0.
-    let theta_x = cumsum_times(&gx, tau_0);
-    let theta_y = cumsum_times(&gy, tau_0);
-    let theta_z = cumsum_times(&gz, tau_0);
+    let theta_x = cumsum_times(gx, tau_0);
+    let theta_y = cumsum_times(gy, tau_0);
+    let theta_z = cumsum_times(gz, tau_0);
 
     let mut tau_s = Vec::with_capacity(ms.len());
     let mut sig_x = Vec::with_capacity(ms.len());
@@ -111,6 +128,29 @@ pub fn analyze_allan_variance(config: AllanConfig) -> Result<AllanResult, Analys
         duration_s,
         sample_rate_hz: fs,
     })
+}
+
+// Allan corto in-situ: el cliente acumula muestras durante N segundos
+// post-IMU-CAL con el sensor estático y se las pasa al backend. Diferencia
+// con analyze_allan_variance: no hay CSV, las muestras viven en memoria.
+#[derive(Debug, serde::Deserialize)]
+pub struct AllanInPlaceConfig {
+    pub timestamps_us: Vec<i64>,
+    pub gx_dps: Vec<f64>,
+    pub gy_dps: Vec<f64>,
+    pub gz_dps: Vec<f64>,
+    pub min_tau_s: f64,
+    pub max_tau_s: f64,
+    pub n_points: usize,
+}
+
+#[tauri::command]
+pub fn analyze_allan_in_place(config: AllanInPlaceConfig) -> Result<AllanResult, AnalysisError> {
+    compute_allan(
+        &config.timestamps_us,
+        &config.gx_dps, &config.gy_dps, &config.gz_dps,
+        config.min_tau_s, config.max_tau_s, config.n_points,
+    )
 }
 
 fn cumsum_times(v: &[f64], factor: f64) -> Vec<f64> {

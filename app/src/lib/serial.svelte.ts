@@ -32,8 +32,47 @@ export type DetectedSensor = {
   addr: string;
   whoami: string;
   name: string;
-  family: 'L3G4200D' | 'L3GD20' | 'L3GD20H' | 'ICM-42688' | 'MPU9250' | 'BNO055' | 'unknown';
+  family: 'L3G4200D' | 'L3GD20' | 'L3GD20H' | 'ICM-42688' | 'MPU9250' | 'BNO055' | 'MPU-6050' | 'ITG-3205' | 'unknown';
   raw: string;
+};
+
+// Estado de calibración IMU reportado por el firmware (>= v1.2.0) vía las
+// líneas estructuradas "IMU CAL JSON {...}" (post-CAL) y "IMU STATUS JSON {...}"
+// (post-conexión). Todos los valores son los del firmware sin re-procesar.
+export type ImuCalState = {
+  bias_dps: [number, number, number];
+  sd_dps: [number, number, number];
+  accel_mag_ms2: number;
+  accel_sd_ms2: number;
+  temp_c: number | null;
+  // ts_ms en el dominio millis() del firmware (post-boot). cal_ts_ms aparece
+  // solo en IMU STATUS JSON; en IMU CAL JSON el campo se llama ts_ms.
+  cal_ts_ms: number;
+  // En STATUS llega también now_ms (millis al momento del query) para que
+  // el cliente calcule edad de la CAL sin asumir relojes alineados.
+  now_ms?: number;
+  samples?: number;
+  odr_ms?: number;
+  fw_hash?: string;
+  driver?: number;
+  // Wall-clock del host al recibir el mensaje, para reportar "última CAL hace X".
+  received_at: number;
+};
+
+// Razones de fallo estructuradas para la UI. Vienen del firmware como
+// "IMU CAL fail <reason> <kv pairs>".
+export type ImuCalFailure = {
+  reason: 'motion' | 'preheat' | 'repeats' | 'gravity' | 'accel_noise' | 'unknown';
+  raw: string;
+  // Subset de campos que algunos modos exponen.
+  sd_dps?: [number, number, number];
+  limit_dps?: number;
+  remain_ms?: number;
+  boot_ms?: number;
+  accel_mag_ms2?: number;
+  accel_sd_ms2?: number;
+  repeats?: number;
+  total?: number;
 };
 
 // Muestra cruda emitida en cada parseLine() exitoso. Sin mapeo de ejes:
@@ -105,6 +144,12 @@ class SerialStore {
   magCalLog = $state<string[]>([]);
   // true tras "IMU CAL done"; false al conectar/desconectar
   calibrated = $state(false);
+  // Snapshot estructurado de la CAL IMU (firmware ≥ 1.2.0). Null en firmwares
+  // viejos o cuando no hay CAL persistida.
+  imuCal = $state<ImuCalState | null>(null);
+  // Razón del último fail de CAL, si lo hubo. Se limpia al iniciar un nuevo
+  // intento o al desconectar.
+  imuCalFailure = $state<ImuCalFailure | null>(null);
   // valores parseados (yaw/pitch/roll + gyro xyz, ya en ° y °/s)
   angle = $state<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
   gyro = $state<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
@@ -326,6 +371,22 @@ class SerialStore {
 
       // Esperar a que el ESP32 termine su boot ("SimHit start") o timeout.
       await this.waitForBoot();
+      // Si el banner del boot llegó antes de que adjuntáramos el listener,
+      // detectedSensor queda null. Pedir explícitamente al firmware que
+      // re-emita el WHO_AM_I (firmware ≥ 1.1.1; en versiones previas se ignora).
+      if (!this.detectedSensor) {
+        await this.sendCommand('SENSOR');
+        // Pequeña ventana para que llegue la respuesta antes de continuar.
+        for (let i = 0; i < 10 && !this.detectedSensor; i++) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      }
+      // Hidratar el snapshot de la CAL IMU persistida (firmware ≥ 1.2.0).
+      // En firmwares viejos no llega "IMU STATUS JSON" y queda en null.
+      await this.sendCommand('IMU STATUS');
+      for (let i = 0; i < 6 && !this.imuCal; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
       // Activar emisión de tramas IMU
       await this.sendCommand('IMU ON');
     } catch (e) {
@@ -353,6 +414,8 @@ class SerialStore {
     this.detectedSensor = null;
     this.firmwareVersionString = null;
     this.espMacAddress = null;
+    this.imuCal = null;
+    this.imuCalFailure = null;
   }
 
   async sendCommand(cmd: string) {
@@ -389,10 +452,27 @@ class SerialStore {
 
   private parseLine(line: string) {
     this.lastLine = line;
+    // Líneas JSON estructuradas del firmware ≥ 1.2.0. Se procesan antes del
+    // bloque textual para que el snapshot estructurado quede actualizado
+    // aunque el cliente ya marcó calibrated=true por la línea textual previa.
+    if (line.startsWith('IMU CAL JSON ')) {
+      this.parseImuCalJson(line.slice('IMU CAL JSON '.length), false);
+      return;
+    }
+    if (line.startsWith('IMU STATUS JSON ')) {
+      this.parseImuCalJson(line.slice('IMU STATUS JSON '.length), true);
+      return;
+    }
+
     if (line.startsWith('IMU CAL ') || line.startsWith('MAG CAL ')) {
       this.lastCalLine = line;
-      if (line.startsWith('IMU CAL done')) this.calibrated = true;
-      else if (line.startsWith('IMU CAL fail')) this.calibrated = false;
+      if (line.startsWith('IMU CAL done')) {
+        this.calibrated = true;
+        this.imuCalFailure = null;
+      } else if (line.startsWith('IMU CAL fail')) {
+        this.calibrated = false;
+        this.parseImuCalFailure(line);
+      }
       // Capturar todas las líneas de MAG CAL para diagnóstico.
       if (line.startsWith('MAG CAL ')) {
         const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
@@ -427,12 +507,14 @@ class SerialStore {
       if (m) {
         const name = m[3].trim();
         const family: DetectedSensor['family'] =
-          name.includes('L3GD20H')  ? 'L3GD20H'  :
-          name.includes('L3GD20')   ? 'L3GD20'   :
-          name.includes('L3G4200D') ? 'L3G4200D' :
-          name.includes('ICM-42688')? 'ICM-42688':
-          name.includes('MPU9250')  ? 'MPU9250'  :
-          name.includes('BNO055')   ? 'BNO055'   : 'unknown';
+          name.includes('L3GD20H')   ? 'L3GD20H'   :
+          name.includes('L3GD20')    ? 'L3GD20'    :
+          name.includes('L3G4200D')  ? 'L3G4200D'  :
+          name.includes('ICM-42688') ? 'ICM-42688' :
+          name.includes('MPU-6050')  ? 'MPU-6050'  :
+          name.includes('MPU9250')   ? 'MPU9250'   :
+          name.includes('BNO055')    ? 'BNO055'    :
+          name.includes('ITG-3205')  ? 'ITG-3205'  : 'unknown';
         // Solo registrar identificaciones reconocidas (descarta "desconocido").
         if (family !== 'unknown') {
           this.detectedSensor = {
@@ -675,6 +757,87 @@ class SerialStore {
   }
 
   private filterStatusResolve: ((mode: AccelFilterMode | null) => void) | null = null;
+
+  // Parser de "IMU CAL JSON {...}" y "IMU STATUS JSON {...}". Conserva NaN-safe
+  // y tolera campos faltantes: el cliente nunca debe romperse por un firmware
+  // futuro que agregue claves nuevas.
+  private parseImuCalJson(payload: string, isStatus: boolean) {
+    let obj: Record<string, unknown>;
+    try { obj = JSON.parse(payload); }
+    catch (e) { console.warn('[serial] IMU CAL JSON inválido', payload, e); return; }
+    const arr3 = (k: string): [number, number, number] | null => {
+      const v = obj[k];
+      if (!Array.isArray(v) || v.length !== 3) return null;
+      return [Number(v[0]), Number(v[1]), Number(v[2])];
+    };
+    const num = (k: string): number => {
+      const v = obj[k];
+      return typeof v === 'number' ? v : Number(v);
+    };
+    const numOrNull = (k: string): number | null => {
+      const v = obj[k];
+      if (v === null || v === undefined) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const bias = arr3('bias_dps');
+    const sd = arr3('sd_dps');
+    if (!bias || !sd) return;
+    this.imuCal = {
+      bias_dps: bias,
+      sd_dps: sd,
+      accel_mag_ms2: num('accel_mag_ms2'),
+      accel_sd_ms2: num('accel_sd_ms2'),
+      temp_c: numOrNull('temp_c'),
+      // STATUS usa cal_ts_ms; CAL usa ts_ms.
+      cal_ts_ms: num(isStatus ? 'cal_ts_ms' : 'ts_ms'),
+      now_ms: isStatus ? num('now_ms') : undefined,
+      samples: numOrNull('samples') ?? undefined,
+      odr_ms: numOrNull('odr_ms') ?? undefined,
+      fw_hash: typeof obj.fw_hash === 'string' ? obj.fw_hash : undefined,
+      driver: numOrNull('driver') ?? undefined,
+      received_at: Date.now(),
+    };
+    if (!isStatus) {
+      // CAL exitosa implica calibrated=true; limpiar cualquier failure previa.
+      this.calibrated = true;
+      this.imuCalFailure = null;
+    }
+  }
+
+  // Parser de "IMU CAL fail <reason> <k=v ...>". Devuelve siempre un objeto
+  // (con reason='unknown' si no parseó). Las claves específicas varían por modo.
+  private parseImuCalFailure(line: string) {
+    const body = line.slice('IMU CAL fail '.length).trim();
+    const reasonMatch = body.match(/^(motion|preheat|repeats|gravity|accel_noise)\b/);
+    const reason = (reasonMatch?.[1] ?? 'unknown') as ImuCalFailure['reason'];
+    const f: ImuCalFailure = { reason, raw: line };
+    const numKv = (key: string): number | undefined => {
+      const m = body.match(new RegExp(`\\b${key}=([\\d.eE+\\-]+)`));
+      return m ? Number(m[1]) : undefined;
+    };
+    const tripleKv = (key: string): [number, number, number] | undefined => {
+      const m = body.match(new RegExp(`\\b${key}=([\\d.eE+\\-]+),([\\d.eE+\\-]+),([\\d.eE+\\-]+)`));
+      return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : undefined;
+    };
+    if (reason === 'motion') {
+      f.sd_dps = tripleKv('sd');
+      f.limit_dps = numKv('limit');
+    } else if (reason === 'preheat') {
+      f.remain_ms = numKv('remain_ms');
+      f.boot_ms = numKv('boot_ms');
+    } else if (reason === 'repeats') {
+      // "repeats=N/total"
+      const m = body.match(/repeats=(\d+)\/(\d+)/);
+      if (m) { f.repeats = Number(m[1]); f.total = Number(m[2]); }
+    } else if (reason === 'gravity') {
+      f.accel_mag_ms2 = numKv('mag');
+    } else if (reason === 'accel_noise') {
+      f.accel_sd_ms2 = numKv('sd');
+      f.limit_dps = numKv('limit'); // reusa el campo, units m/s²
+    }
+    this.imuCalFailure = f;
+  }
 
   // Drena cola de gyro (mapeada a yaw del eje configurado) desde último tick.
   // Conservado para compatibilidad con llamadores que no consumen pitch.

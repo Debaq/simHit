@@ -7,6 +7,7 @@
   import { acceptance } from '$lib/acceptance.svelte';
   import { firmware } from '$lib/firmware.svelte';
   import { flash } from '$lib/flash.svelte';
+  import { allanInPlace } from '$lib/allan-inplace.svelte';
   import { onMount } from 'svelte';
 
   // Vista de Métricas / Caracterización. La sección "Captura" usa el módulo
@@ -62,22 +63,99 @@
   // 2) Identificación del sensor. Datos reales provenientes del banner que
   // el firmware emite en el boot ("Gyro WHO_AM_I @0xXX = 0xYY (Nombre)"),
   // capturado por serial.svelte.ts en serial.detectedSensor.
-  type CatalogEntry = { label: string; addr: string; whoami: string; mag: boolean };
+  // Una entrada por driver de firmware (no por chip), igual que el campo
+  // SENSOR_DRIVER del .ino y los slugs de firmware/manifest.json. Cada driver
+  // puede usar uno o varios chips combinados (caso L3G + LSM303D).
+  type ChipPart = { label: string; role: string; addr: string; whoami?: string };
+  type CatalogEntry = {
+    slug: string;                  // coincide con manifest.supported_sensors[].slug
+    label: string;
+    families: string[];            // familia(s) reportada(s) por el firmware en boot
+    fusion: 'externa' | 'interna';
+    vendor: string;
+    parts: ChipPart[];             // chips concretos que cubre este driver
+    notes?: string;
+  };
   const SENSOR_CATALOG: CatalogEntry[] = [
-    { label: 'L3GD20H',  addr: '0x6A/0x6B', whoami: '0xD7', mag: false },
-    { label: 'L3GD20',   addr: '0x6A/0x6B', whoami: '0xD4', mag: false },
-    { label: 'L3G4200D', addr: '0x69',      whoami: '0xD3', mag: false },
-    { label: 'ICM-42688', addr: '0x68/0x69', whoami: '0x47', mag: false },
-    { label: 'MPU9250',  addr: '0x68/0x69', whoami: '0x71', mag: true },
-    { label: 'BNO055',   addr: '0x28/0x29', whoami: '0xA0', mag: true },
+    {
+      slug: 'l3g-lsm303',
+      label: 'L3G + LSM303D',
+      families: ['L3GD20H', 'L3GD20', 'L3G4200D'],
+      fusion: 'externa',
+      vendor: 'STMicroelectronics',
+      parts: [
+        { label: 'L3GD20H',  role: 'Gyro 3 ejes (±2000 dps)', addr: '0x6A/0x6B', whoami: '0xD7' },
+        { label: 'L3GD20',   role: 'Gyro 3 ejes (±2000 dps) — variante previa', addr: '0x6A/0x6B', whoami: '0xD4' },
+        { label: 'L3G4200D', role: 'Gyro 3 ejes (±2000 dps) — familia previa', addr: '0x69',      whoami: '0xD3' },
+        { label: 'LSM303D',  role: 'Accel ±16 g + Mag ±12 gauss (6 ejes combinados)', addr: '0x1D/0x1E' },
+      ],
+      notes: 'El firmware discrimina la variante L3G por WHO_AM_I; el LSM303 va apareado y aporta accel + mag. Fusión Madgwick en el ESP32.',
+    },
+    {
+      slug: 'icm-42688',
+      label: 'ICM-42688',
+      families: ['ICM-42688'],
+      fusion: 'externa',
+      vendor: 'TDK InvenSense',
+      parts: [
+        { label: 'ICM-42688', role: 'Gyro + Accel (6-DOF, ±2000 dps, ±16 g)', addr: '0x68/0x69', whoami: '0x47' },
+      ],
+      notes: 'Sin magnetómetro. Muy bajo ruido (ARW ~0.3 °/√h, BI ~24 °/h). Yaw deriva con el tiempo si no se suma un mag externo.',
+    },
+    {
+      slug: 'mpu9250',
+      label: 'MPU-9250 + AK8963',
+      families: ['MPU9250'],
+      fusion: 'externa',
+      vendor: 'InvenSense (TDK)',
+      parts: [
+        { label: 'MPU-9250', role: 'Gyro + Accel (±2000 dps, ±16 g)', addr: '0x68/0x69', whoami: '0x71' },
+        { label: 'AK8963',   role: 'Magnetómetro 3 ejes (±4900 µT)', addr: '0x0C' },
+      ],
+      notes: 'Descontinuado pero abundante. El AK8963 está físicamente dentro del package; se accede por bypass I2C del MPU.',
+    },
+    {
+      slug: 'bno055',
+      label: 'BNO055',
+      families: ['BNO055'],
+      fusion: 'interna',
+      vendor: 'Bosch Sensortec',
+      parts: [
+        { label: 'BNO055', role: '9-DOF (gyro + accel + mag) con fusión Kalman interna', addr: '0x28/0x29', whoami: '0xA0' },
+      ],
+      notes: 'Saca yaw/pitch/roll directamente (no requiere Madgwick en el ESP32). El firmware bypasea el bias-removal para no degradar la fusión interna. Disponibilidad incierta (chip cercano a EOL).',
+    },
+    {
+      slug: 'mpu6050',
+      label: 'MPU-6050',
+      families: ['MPU-6050'],
+      fusion: 'externa',
+      vendor: 'InvenSense (TDK)',
+      parts: [
+        { label: 'MPU-6050', role: 'Gyro + Accel (6-DOF, ±2000 dps, ±16 g)', addr: '0x68/0x69', whoami: '0x68' },
+      ],
+      notes: 'Versión sin magnetómetro del MPU-9250. Muy abundante en módulos GY-521. Fusión Madgwick en el ESP32.',
+    },
+    {
+      slug: 'itg-adxl-hmc',
+      label: 'HW-579',
+      families: ['ITG-3205'],
+      fusion: 'externa',
+      vendor: 'placa combo (varios fabricantes)',
+      parts: [
+        { label: 'ITG-3205',  role: 'Gyro 3 ejes ±2000 dps', addr: '0x68/0x69', whoami: '0x68' },
+        { label: 'ADXL345',   role: 'Accel ±16 g (full-res)', addr: '0x53' },
+        { label: 'HMC5883L',  role: 'Magnetómetro ±1.3 G', addr: '0x1E' },
+      ],
+      notes: 'Placa breakout de 3 chips. Algunos lotes recientes traen QMC5883L en lugar de HMC5883L (mapping distinto, addr 0x0D); el driver actual solo soporta HMC y deja mag NaN si no responde.',
+    },
   ];
-  // Vista equivalente del sensor detectado, mapeada al catálogo para
-  // resaltar la fila correspondiente y para alimentar el resto del flujo.
+  // El sensor reportado por el firmware (familia) se mapea al driver del
+  // catálogo, no a un chip individual.
   let detectedSensor = $derived.by<CatalogEntry | null>(() => {
     const ds = serial.detectedSensor;
     if (!ds) return null;
-    const match = SENSOR_CATALOG.find((c) => c.label === ds.family) ?? null;
-    return match ?? { label: ds.name, addr: ds.addr, whoami: ds.whoami, mag: false };
+    return SENSOR_CATALOG.find((c) => c.families.includes(ds.family)) ?? null;
   });
   // Info del firmware: prefiere la versión real (banner "SimHit FW x.y.z");
   // si no llegó, cae al formato de trama como heurística.
@@ -281,6 +359,15 @@
         esp32_mac: serial.espMacAddress,
       },
       acceptance_preset: { id: acceptance.active.id, name: acceptance.active.name },
+      calibration: serial.imuCal ? {
+        ...serial.imuCal,
+        // Edad de la CAL al momento del export (s), usando el reloj del firmware.
+        age_s: serial.imuCal.now_ms != null
+          ? (serial.imuCal.now_ms - serial.imuCal.cal_ts_ms) / 1000
+          : null,
+        // Allan corto medido al final del CAL (si el usuario lo corrió).
+        allan_in_place: allanInPlace.result,
+      } : null,
       session: {
         id: capture.sessionId,
         csv_path: capture.csvPath,
@@ -618,7 +705,9 @@
                   <dt>Dirección I²C</dt><dd><code>{serial.detectedSensor.addr}</code></dd>
                   <dt>WHO_AM_I</dt><dd><code>{serial.detectedSensor.whoami}</code></dd>
                   <dt>Familia</dt><dd>{serial.detectedSensor.family}</dd>
-                  <dt>Magnetómetro</dt><dd>{detectedSensor.mag ? 'Sí' : 'No'}</dd>
+                  <dt>Driver</dt><dd>{detectedSensor.label}</dd>
+                  <dt>Fusión</dt><dd>{detectedSensor.fusion}</dd>
+                  <dt>Magnetómetro</dt><dd>{detectedSensor.parts.some((p) => /mag/i.test(p.role)) ? 'Sí' : 'No'}</dd>
                   <dt>Firmware</dt><dd>{serial.firmwareVersion} ({firmwareInfo.git})</dd>
                   <dt>Sample rate</dt><dd>{firmwareInfo.sample_rate} Hz</dd>
                   {#if serial.calibrated}
@@ -647,22 +736,35 @@
 
           <div class="card">
             <div class="card-h">Catálogo soportado</div>
-            <table class="tbl">
-              <thead>
-                <tr><th>Sensor</th><th>Dir</th><th>WAI</th><th>Mag</th></tr>
-              </thead>
-              <tbody>
-                {#each SENSOR_CATALOG as s}
-                  <tr class:hit={detectedSensor?.label === s.label}>
-                    <td>{s.label}</td>
-                    <td><code>{s.addr}</code></td>
-                    <td><code>{s.whoami}</code></td>
-                    <td>{s.mag ? '✓' : '—'}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-            <p class="note inline">El firmware actual escanea solo la familia L3G (0x69/0x6A/0x6B). Soporte multi-sensor (ICM/MPU/BNO) está en el roadmap.</p>
+            <ul class="sensor-list">
+              {#each SENSOR_CATALOG as s}
+                {@const hasMag = s.parts.some((p) => /mag/i.test(p.role))}
+                <li class:hit={detectedSensor?.slug === s.slug}>
+                  <div class="sensor-list-h">
+                    <div>
+                      <b>{s.label}</b>
+                      <span class="vendor">{s.vendor}</span>
+                    </div>
+                    <div class="sensor-tags">
+                      <span class="tag" class:tag-on={hasMag}>{hasMag ? 'magnetómetro ✓' : 'sin magnetómetro'}</span>
+                      <span class="tag" class:tag-accent={s.fusion === 'interna'}>fusión {s.fusion}</span>
+                    </div>
+                  </div>
+                  <ul class="parts-list">
+                    {#each s.parts as p}
+                      <li>
+                        <b>{p.label}</b> — {p.role}
+                        <span class="part-tags">
+                          <span class="tag">addr <code>{p.addr}</code></span>
+                          {#if p.whoami}<span class="tag">WAI <code>{p.whoami}</code></span>{/if}
+                        </span>
+                      </li>
+                    {/each}
+                  </ul>
+                  {#if s.notes}<div class="sensor-notes">{s.notes}</div>{/if}
+                </li>
+              {/each}
+            </ul>
           </div>
         </div>
       </section>
@@ -1157,9 +1259,7 @@
   }
   .layout {
     flex: 1;
-    max-width: 1100px;
     width: 100%;
-    margin: 0 auto;
     padding: 78px 20px 32px;
     display: flex;
     flex-direction: column;
@@ -1482,6 +1582,53 @@
   .verdict-badge.bad { background: var(--danger); }
   .verdict-badge.warn { background: var(--primary); }
   .verdict-badge.pending { background: var(--text-muted); }
+
+  .sensor-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .sensor-list li {
+    padding: 10px 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid transparent;
+  }
+  .sensor-list li.hit {
+    border-left-color: var(--primary);
+    background: var(--primary-soft);
+  }
+  .sensor-list-h {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 12px; margin-bottom: 4px; flex-wrap: wrap;
+  }
+  .sensor-list b { font-size: 14px; color: var(--text); }
+  .vendor {
+    font-size: 11px; color: var(--text-muted);
+    margin-left: 6px;
+  }
+  .sensor-tags {
+    display: flex; gap: 4px; flex-wrap: wrap;
+  }
+  .tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+  .tag code { background: transparent; padding: 0; }
+  .tag.tag-on { background: rgba(22,163,74,.12); color: var(--success); border-color: rgba(22,163,74,.3); }
+  .tag.tag-accent { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .sensor-contents {
+    font-size: 12px; color: var(--text);
+    margin-top: 4px;
+  }
+  .sensor-notes {
+    font-size: 11px; color: var(--text-muted);
+    margin-top: 4px; line-height: 1.4;
+  }
 
   .update-box {
     padding: 12px;

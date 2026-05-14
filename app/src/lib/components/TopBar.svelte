@@ -5,6 +5,7 @@
   import { sim } from '$lib/simulator.svelte';
   import { serial } from '$lib/serial.svelte';
   import { bundles } from '$lib/bundle.svelte';
+  import { allanInPlace } from '$lib/allan-inplace.svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
 
   const appWindow = getCurrentWindow();
@@ -90,27 +91,59 @@
     calModal = 'instructions';
   }
 
+  // Compone un mensaje legible a partir del fail estructurado (firmware ≥ 1.2.0).
+  // Cae al mensaje genérico si solo recibimos la línea textual antigua.
+  function failureMessage(): string {
+    const f = serial.imuCalFailure;
+    if (!f) return 'La calibración falló. Mantener el sensor inmóvil y reintentar.';
+    switch (f.reason) {
+      case 'motion': {
+        const sd = f.sd_dps ? `${f.sd_dps[0].toFixed(2)}, ${f.sd_dps[1].toFixed(2)}, ${f.sd_dps[2].toFixed(2)}` : '?';
+        const lim = f.limit_dps?.toFixed(2) ?? '?';
+        return `Se detectó movimiento (σ por eje = ${sd} °/s, límite ${lim}). Mantener el sensor inmóvil y reintentar.`;
+      }
+      case 'preheat': {
+        const r = f.remain_ms != null ? Math.ceil(f.remain_ms / 1000) : null;
+        return r != null
+          ? `El sensor todavía está en pre-calentamiento (${r} s restantes). El bias del giroscopio deriva durante el primer minuto. Esperar y reintentar, o usar IMU CAL FORCE en debugging.`
+          : 'El sensor todavía está en pre-calentamiento. Esperar 1 minuto desde encender el dispositivo.';
+      }
+      case 'repeats':
+        return `El sensor entregó muestras repetidas (${f.repeats}/${f.total}). El ODR real del chip es menor al esperado por el firmware. Revisar configuración de drivers.`;
+      case 'gravity': {
+        const m = f.accel_mag_ms2?.toFixed(2) ?? '?';
+        return `La aceleración no se ajusta a la gravedad (‖a‖ = ${m} m/s², esperado ≈ 9.80). Apoyar el sensor sobre una superficie estable y reintentar.`;
+      }
+      case 'accel_noise': {
+        const sd = f.accel_sd_ms2?.toFixed(3) ?? '?';
+        return `Vibración mecánica detectada (σ‖a‖ = ${sd} m/s²). Aislar el sensor de fuentes de vibración y reintentar.`;
+      }
+      default:
+        return `La calibración falló: ${f.raw}`;
+    }
+  }
+
   async function runCalibration() {
     calModal = 'running';
     calError = '';
     serial.lastCalLine = '';
+    serial.imuCalFailure = null;
     await serial.sendCommand('IMU CAL');
 
     // Esperar respuesta del firmware: "IMU CAL done ..." o "IMU CAL fail ...".
+    // El timeout se sube a 6 s para tolerar el segundo extra de I/O del nuevo
+    // CAL (lectura de accel + temp post-loop).
     const t0 = Date.now();
-    while (Date.now() - t0 < 4000) {
+    while (Date.now() - t0 < 6000) {
       await new Promise((r) => setTimeout(r, 50));
       const ll = serial.lastCalLine;
       if (ll.startsWith('IMU CAL done')) {
         calModal = 'done';
-        setTimeout(() => { if (calModal === 'done') calModal = 'closed'; }, 1400);
+        // No auto-cerramos: el usuario puede correr Allan corto opcional.
         return;
       }
       if (ll.startsWith('IMU CAL fail')) {
-        const m = ll.match(/sd=([\d.,-]+)/);
-        calError = m
-          ? `Se detectó movimiento durante la calibración (σ=${m[1]} °/s). Mantener el sensor inmóvil y reintentar.`
-          : 'La calibración falló. Mantener el sensor inmóvil y reintentar.';
+        calError = failureMessage();
         calModal = 'error';
         return;
       }
@@ -390,7 +423,49 @@
       {:else if calModal === 'done'}
         <h3 id="cal-title">Calibración completa</h3>
         <div class="check" aria-hidden="true">✓</div>
-        <p class="hint">Listo para iniciar el examen.</p>
+
+        {#if serial.imuCal}
+          <dl class="cal-summary">
+            <dt>Bias gyro</dt>
+            <dd>{serial.imuCal.bias_dps.map((v) => v.toFixed(3)).join(', ')} °/s</dd>
+            <dt>σ (ruido)</dt>
+            <dd>{serial.imuCal.sd_dps.map((v) => v.toFixed(3)).join(', ')} °/s</dd>
+            <dt>‖a‖ medida</dt>
+            <dd>{serial.imuCal.accel_mag_ms2.toFixed(2)} m/s²</dd>
+            {#if serial.imuCal.temp_c != null}
+              <dt>Temp chip</dt><dd>{serial.imuCal.temp_c.toFixed(1)} °C</dd>
+            {/if}
+          </dl>
+        {/if}
+
+        <!-- Allan corto in-situ: opcional, captura ARW + bias instability con el
+             sensor todavía caliente y estático -->
+        {#if allanInPlace.stage === 'idle' || allanInPlace.stage === 'error'}
+          <div class="actions">
+            <button class="btn-secondary" onclick={() => { calModal = 'closed'; allanInPlace.reset(); }}>Cerrar</button>
+            <button class="btn-primary" onclick={() => allanInPlace.run(10)}>Medir ARW (10 s)</button>
+          </div>
+          {#if allanInPlace.error}<p class="err-msg" style="margin-top:8px">{allanInPlace.error}</p>{/if}
+        {:else if allanInPlace.stage === 'collecting'}
+          <p class="hint big">Manteniendo el sensor inmóvil — captura Allan en curso…</p>
+          <div class="bar"><div class="bar-fill" style:width="{allanInPlace.progress * 100}%"></div></div>
+          <p class="hint mono">{allanInPlace.collectedSamples} muestras recolectadas</p>
+        {:else if allanInPlace.stage === 'computing'}
+          <p class="hint">Calculando Allan variance…</p>
+          <div class="spinner" aria-hidden="true"></div>
+        {:else if allanInPlace.stage === 'done' && allanInPlace.result}
+          {@const r = allanInPlace.result}
+          <dl class="cal-summary">
+            <dt>ARW (°/√h)</dt>
+            <dd>{r.arw_deg_sqrt_hr.map((v) => v.toFixed(3)).join(', ')}</dd>
+            <dt>Bias instab.</dt>
+            <dd>{r.bias_instability_deg_hr.map((v) => v.toFixed(1)).join(', ')} °/h</dd>
+            <dt>Duración</dt><dd>{r.duration_s.toFixed(1)} s ({r.n_samples_total} muestras)</dd>
+          </dl>
+          <div class="actions">
+            <button class="btn-primary" onclick={() => { calModal = 'closed'; allanInPlace.reset(); }}>Cerrar</button>
+          </div>
+        {/if}
       {:else if calModal === 'error'}
         <h3 id="cal-title">Calibración fallida</h3>
         <div class="cross" aria-hidden="true">!</div>
@@ -768,6 +843,18 @@
     margin: 12px auto;
     animation: pop .3s ease-out;
   }
+  .cal-summary {
+    display: grid; grid-template-columns: auto 1fr; gap: 4px 12px;
+    margin: 12px 0;
+    padding: 10px 12px;
+    background: var(--surface-2);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+  }
+  .cal-summary dt { color: var(--text-muted); font-weight: 500; }
+  .cal-summary dd { margin: 0; font-family: ui-monospace, monospace; }
+  .hint.big { font-size: 13px; font-weight: 500; color: var(--text); text-align: center; margin: 12px 0; }
+  .hint.mono { font-family: ui-monospace, monospace; font-size: 11px; text-align: center; }
   .cross {
     width: 56px; height: 56px;
     border-radius: 50%;
