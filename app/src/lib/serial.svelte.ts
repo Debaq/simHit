@@ -150,6 +150,9 @@ class SerialStore {
   // Razón del último fail de CAL, si lo hubo. Se limpia al iniciar un nuevo
   // intento o al desconectar.
   imuCalFailure = $state<ImuCalFailure | null>(null);
+  // Temperatura del chip leída en la última muestra IMU. NaN si el sensor
+  // no la expone. Permite detectar drift térmico entre CALs.
+  currentTempC = $state<number>(NaN);
   // valores parseados (yaw/pitch/roll + gyro xyz, ya en ° y °/s)
   angle = $state<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
   gyro = $state<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
@@ -416,6 +419,7 @@ class SerialStore {
     this.espMacAddress = null;
     this.imuCal = null;
     this.imuCalFailure = null;
+    this.currentTempC = NaN;
   }
 
   async sendCommand(cmd: string) {
@@ -634,6 +638,7 @@ class SerialStore {
     this.angularAccelX = aax; this.angularAccelY = aay; this.angularAccelZ = aaz;
     this.linearAccelX  = lax; this.linearAccelY  = lay; this.linearAccelZ  = laz;
     this.fwTimestamp = ts;
+    if (Number.isFinite(tempC)) this.currentTempC = tempC;
     this.gyroQueue.push({ x: gx, y: gy, z: gz });
     this.angAccelQueue.push({ x: aax, y: aay, z: aaz });
     this.linAccelQueue.push({ x: lax, y: lay, z: laz });

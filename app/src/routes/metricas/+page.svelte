@@ -8,6 +8,8 @@
   import { firmware } from '$lib/firmware.svelte';
   import { flash } from '$lib/flash.svelte';
   import { allanInPlace } from '$lib/allan-inplace.svelte';
+  import { getCalPolicy } from '$lib/calibration-policy.svelte';
+  import { biasDrift } from '$lib/bias-drift.svelte';
   import { onMount } from 'svelte';
 
   // Vista de Métricas / Caracterización. La sección "Captura" usa el módulo
@@ -22,9 +24,22 @@
   // módulo de métricas; por ahora solo detectamos versión y advertimos.
 
   // Consultar el manifest + listar puertos USB al montar la vista.
+  // Arrancar el monitor de drift del bias (no estorba al simulador: solo
+  // engancha al captureSink y lee el stream gyro existente).
   onMount(() => {
     void firmware.check(false);
     void refreshUsbPorts();
+    biasDrift.start();
+    return () => biasDrift.stop();
+  });
+
+  // Política de re-CAL — derivada de serial.imuCal + temperatura corriente.
+  // Se re-evalúa automáticamente cuando cambian los inputs reactivos.
+  let calPolicy = $derived.by(() => {
+    // Tocar los reactivos relevantes para que Svelte sepa rebuilear:
+    void serial.imuCal; void serial.currentTempC; void serial.fwTimestamp;
+    void serial.connected;
+    return getCalPolicy();
   });
 
   // Lista de puertos USB-Serial para instalación desde cero (sin firmware).
@@ -496,6 +511,47 @@
           <h2>Firmware</h2>
           <p class="lead">Versión instalada en el dispositivo y chequeo de actualizaciones publicadas en el repo.</p>
         </header>
+
+        <!-- Política de re-CAL: edad y drift térmico de la última calibración -->
+        {#if calPolicy.status === 'aged' || calPolicy.status === 'thermal-drift' || calPolicy.status === 'no-cal'}
+          <div class="warn-msg">
+            <span class="warn-ic">!</span>
+            <div>
+              <b>
+                {#if calPolicy.status === 'no-cal'}Sin calibración
+                {:else if calPolicy.status === 'aged'}Calibración vieja
+                {:else}Deriva térmica detectada
+                {/if}
+              </b>
+              <div>{calPolicy.message}</div>
+              {#if calPolicy.age_s != null || calPolicy.thermal_drift_c != null}
+                <div style="font-size:11px;margin-top:4px;color:var(--text-muted);font-family:ui-monospace,monospace">
+                  {#if calPolicy.age_s != null}edad CAL: {(calPolicy.age_s / 60).toFixed(1)} min{/if}
+                  {#if calPolicy.thermal_drift_c != null} · ΔT: {calPolicy.thermal_drift_c.toFixed(2)} °C{/if}
+                  {#if Number.isFinite(serial.currentTempC)} · temp actual: {serial.currentTempC.toFixed(1)} °C{/if}
+                </div>
+              {/if}
+            </div>
+          </div>
+        {/if}
+
+        <!-- Drift del bias detectado en runtime (ventana quieta con promedio ≠ 0) -->
+        {#if biasDrift.driftDetected && biasDrift.lastQuietMean}
+          <div class="warn-msg">
+            <span class="warn-ic">!</span>
+            <div>
+              <b>Deriva del bias del giroscopio</b>
+              <div>
+                Con el sensor sostenido en quietud el firmware reporta una velocidad angular residual.
+                Eso indica que el bias calibrado quedó desfasado — recalibre antes del próximo examen.
+              </div>
+              <div style="font-size:11px;margin-top:4px;color:var(--text-muted);font-family:ui-monospace,monospace">
+                Última ventana quieta (mean): {biasDrift.lastQuietMean.map((v) => v.toFixed(3)).join(', ')} °/s
+                · Peak sesión: {biasDrift.driftPeak.map((v) => v.toFixed(3)).join(', ')} °/s
+              </div>
+            </div>
+          </div>
+        {/if}
 
         <div class="grid-2">
           <div class="card">
