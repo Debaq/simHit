@@ -53,10 +53,10 @@
     }
   ],
   "latest": {
-    "version": "1.2.1",
+    "version": "1.3.0",
     "channel": "stable",
     "released_at": "2026-05-14",
-    "notes": "v1.2.1: calibración del giroscopio endurecida (pre-warmup adaptado por sensor, validación de gravedad y ruido del accel, detección de muestras repetidas, persistencia NVS, reporte JSON), fusión runtime 6/9-DOF según mag disponible, drivers nuevos MPU-6050 y HW-579 (ITG-3205+ADXL345+HMC5883L), MAG CAL multi-driver, autodetección I²C 0x68/0x69 y 0x28/0x29.",
+    "notes": "v1.3.0: agrega driver ICM-20948 (sucesor del MPU-9250 en producción, 9-DOF con AK09916 mag integrado). Resto idéntico a 1.2.1.",
     "min_compatible_app": "2026.5.0",
     "artifacts": [
       {
@@ -64,48 +64,56 @@
         "sensor": "l3g-lsm303",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.2.1/simhit-fw-1.2.1-esp32c3-l3g-lsm303.merged.bin",
-        "sha256": "061294c08c386bac71590205f5e9e3bb20a2075375761256793eda7e0040bba3"
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.3.0/simhit-fw-1.3.0-esp32c3-l3g-lsm303.merged.bin",
+        "sha256": "a97e982207d9178556f518f8eb6369eb262b221ecfd3778686f1f7474ef89583"
       },
       {
         "board": "esp32-c3-supermini",
         "sensor": "icm-42688",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.2.1/simhit-fw-1.2.1-esp32c3-icm-42688.merged.bin",
-        "sha256": "71de8f26548efa595501f82512ca90ae0b68decf07b5781e4c016e5a3114bb65"
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.3.0/simhit-fw-1.3.0-esp32c3-icm-42688.merged.bin",
+        "sha256": "12058bb45193c97253066b1e5f21d15a30aee4d074b1a85afbced0aa8f3302f3"
       },
       {
         "board": "esp32-c3-supermini",
         "sensor": "mpu9250",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.2.1/simhit-fw-1.2.1-esp32c3-mpu9250.merged.bin",
-        "sha256": "b62e2e9d28939dd0ffc2c7051a798d32b303df0b6966998d85af1cf116e92d80"
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.3.0/simhit-fw-1.3.0-esp32c3-mpu9250.merged.bin",
+        "sha256": "a18eead38d641bfe1c9fcb110d2c59a5dc68df7f404d9ba1ed4f6bc1da1b8517"
       },
       {
         "board": "esp32-c3-supermini",
         "sensor": "bno055",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.2.1/simhit-fw-1.2.1-esp32c3-bno055.merged.bin",
-        "sha256": "f6d6ea42e78f70f1fe3ec72240b92ac4f62f2d50bbb88ea26dbb6a429830a54c"
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.3.0/simhit-fw-1.3.0-esp32c3-bno055.merged.bin",
+        "sha256": "2394efe3d9cc5b9410bbcfc71f53137425ea6c6f6424c63140260cd27271b1a2"
       },
       {
         "board": "esp32-c3-supermini",
         "sensor": "mpu6050",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.2.1/simhit-fw-1.2.1-esp32c3-mpu6050.merged.bin",
-        "sha256": "bcefa5211d4fa9a75128410b2b00adb2719656d3b79d4e5319be0cbcb27d416d"
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.3.0/simhit-fw-1.3.0-esp32c3-mpu6050.merged.bin",
+        "sha256": "33563fe1a8688c8e9dd7a6a6485765a38ec47e4ddc0842c985f51bfbc178c862"
       },
       {
         "board": "esp32-c3-supermini",
         "sensor": "itg-adxl-hmc",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.2.1/simhit-fw-1.2.1-esp32c3-itg-adxl-hmc.merged.bin",
-        "sha256": "fec0d279485bfcd318f667a06f5eb7fe8aa5fc69e5874415f15a11c4e12a3de9"
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.3.0/simhit-fw-1.3.0-esp32c3-itg-adxl-hmc.merged.bin",
+        "sha256": "bbaf0ea2c2b972873034aa3aa123853d5c8824e37f208c8783be20005cbb0585"
+      },
+      {
+        "board": "esp32-c3-supermini",
+        "sensor": "icm-20948",
+        "image_type": "merged",
+        "flash_address": 0,
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.3.0/simhit-fw-1.3.0-esp32c3-icm-20948.merged.bin",
+        "sha256": "dfdad926ff8873f5c55af0644607f956b43d0cba605ad628fbb9dbb135245d35"
       }
     ]
   },
