@@ -102,7 +102,8 @@ class FirmwareStore {
       let lastError: string | null = null;
       for (const url of REMOTE_URLS) {
         try {
-          const r = await fetch(url, { cache: 'no-store' });
+          // Cache-bust con query timestamp por si la CDN o el webview cachean.
+          const r = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
           if (!r.ok) { lastError = `HTTP ${r.status} en ${url}`; continue; }
           const json = (await r.json()) as FirmwareManifest;
           if (!json.latest?.version) {

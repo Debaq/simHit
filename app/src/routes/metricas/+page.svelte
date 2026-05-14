@@ -24,10 +24,12 @@
   // módulo de métricas; por ahora solo detectamos versión y advertimos.
 
   // Consultar el manifest + listar puertos USB al montar la vista.
+  // Force=true: el manifest puede haber cambiado en main desde la última
+  // carga (release nuevo, SHA actualizado). El costo es un fetch extra.
   // Arrancar el monitor de drift del bias (no estorba al simulador: solo
   // engancha al captureSink y lee el stream gyro existente).
   onMount(() => {
-    void firmware.check(false);
+    void firmware.check(true);
     void refreshUsbPorts();
     biasDrift.start();
     return () => biasDrift.stop();
