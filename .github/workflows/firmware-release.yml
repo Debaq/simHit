@@ -55,6 +55,9 @@ jobs:
           - slug: itg-adxl-hmc
             macro: ITG_ADXL_HMC
             label: 'Compilar — HW-579 (ITG-3205 + ADXL345 + HMC5883L) [sin testear]'
+          - slug: icm-20948
+            macro: ICM_20948
+            label: 'Compilar — ICM-20948 (9-DOF en producción) [sin testear]'
 
     env:
       FQBN: esp32:esp32:XIAO_ESP32C3
@@ -186,6 +189,7 @@ jobs:
             | BNO055 (fusión interna) | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-bno055.merged.bin` | ⚠ sin testear |
             | MPU-6050 (6-DOF) | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-mpu6050.merged.bin` | ⚠ sin testear |
             | HW-579 (ITG-3205 + ADXL345 + HMC5883L) | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-itg-adxl-hmc.merged.bin` | ⚠ sin testear |
+            | ICM-20948 (9-DOF sucesor del MPU-9250, en producción) | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-icm-20948.merged.bin` | ⚠ sin testear |
 
             **Board:** `${{ env.FQBN }}` (ESP32-C3 SuperMini)
 

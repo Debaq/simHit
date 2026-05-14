@@ -164,6 +164,17 @@
       ],
       notes: 'Placa breakout de 3 chips. Algunos lotes recientes traen QMC5883L en lugar de HMC5883L (mapping distinto, addr 0x0D); el driver actual solo soporta HMC y deja mag NaN si no responde.',
     },
+    {
+      slug: 'icm-20948',
+      label: 'ICM-20948',
+      families: ['ICM-20948'],
+      fusion: 'externa',
+      vendor: 'TDK InvenSense',
+      parts: [
+        { label: 'ICM-20948', role: 'Gyro + Accel + AK09916 mag (9-DOF, ±2000 dps, ±16 g)', addr: '0x68/0x69', whoami: '0xEA' },
+      ],
+      notes: 'Sucesor del MPU-9250: mismo paquete 9-DOF pero EN PRODUCCIÓN (TDK lo mantiene), industrial temp range, mejor ruido. AK09916 reemplaza al AK8963 con mapeo similar pero registros distintos. Recomendado por sobre MPU-9250 para nuevos diseños.',
+    },
   ];
   // El sensor reportado por el firmware (familia) se mapea al driver del
   // catálogo, no a un chip individual.

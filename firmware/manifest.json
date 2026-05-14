@@ -43,6 +43,13 @@
       "families": ["ITG-3205"],
       "who_am_i": ["0x68", "0x69"],
       "validated": false
+    },
+    {
+      "slug": "icm-20948",
+      "label": "ICM-20948 (9-DOF en producción, sin testear)",
+      "families": ["ICM-20948"],
+      "who_am_i": ["0xEA"],
+      "validated": false
     }
   ],
   "latest": {

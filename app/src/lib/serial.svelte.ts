@@ -32,7 +32,7 @@ export type DetectedSensor = {
   addr: string;
   whoami: string;
   name: string;
-  family: 'L3G4200D' | 'L3GD20' | 'L3GD20H' | 'ICM-42688' | 'MPU9250' | 'BNO055' | 'MPU-6050' | 'ITG-3205' | 'unknown';
+  family: 'L3G4200D' | 'L3GD20' | 'L3GD20H' | 'ICM-42688' | 'MPU9250' | 'BNO055' | 'MPU-6050' | 'ITG-3205' | 'ICM-20948' | 'unknown';
   raw: string;
 };
 
@@ -514,6 +514,7 @@ class SerialStore {
           name.includes('L3GD20H')   ? 'L3GD20H'   :
           name.includes('L3GD20')    ? 'L3GD20'    :
           name.includes('L3G4200D')  ? 'L3G4200D'  :
+          name.includes('ICM-20948') ? 'ICM-20948' :
           name.includes('ICM-42688') ? 'ICM-42688' :
           name.includes('MPU-6050')  ? 'MPU-6050'  :
           name.includes('MPU9250')   ? 'MPU9250'   :

@@ -39,7 +39,7 @@
 // Versión del firmware. Sincronizar con firmware/manifest.json cada vez que se
 // haga un release. El cliente la usa para chequear actualizaciones contra el
 // manifest del repo.
-#define FW_VERSION_STRING "1.2.1"
+#define FW_VERSION_STRING "1.3.0"
 
 // ──────────────────── Selección del driver de sensor ────────────────────
 // La CI pasa -DSENSOR_DRIVER=<MACRO> al compilador para producir un .bin por
@@ -54,6 +54,7 @@
 #define BNO055        4
 #define MPU_6050      5
 #define ITG_ADXL_HMC  6
+#define ICM_20948     7
 
 #ifndef SENSOR_DRIVER
   #define SENSOR_DRIVER L3G_LSM303
@@ -85,8 +86,12 @@
   #define IMU_HAS_MAG 1
   #define IMU_HAS_ACCEL 1
   #define IMU_NAME_LITERAL "ITG-3205 + ADXL345 + HMC5883L"
+#elif SENSOR_DRIVER == ICM_20948
+  #define IMU_HAS_MAG 1
+  #define IMU_HAS_ACCEL 1
+  #define IMU_NAME_LITERAL "ICM-20948"
 #else
-  #error "SENSOR_DRIVER no reconocido. Válidos: L3G_LSM303 | ICM_42688 | MPU9250 | BNO055 | MPU_6050 | ITG_ADXL_HMC"
+  #error "SENSOR_DRIVER no reconocido. Válidos: L3G_LSM303 | ICM_42688 | MPU9250 | BNO055 | MPU_6050 | ITG_ADXL_HMC | ICM_20948"
 #endif
 
 #define I2C_SDA_PIN 6
@@ -230,6 +235,42 @@ static const float ADXL_ACCEL_SENS_MS2 = 0.004f * 9.80665f;
 static const float HMC_MAG_SENS_UT = 100.0f / 1090.0f;  // 1 gauss = 100 µT
 #endif
 
+#if SENSOR_DRIVER == ICM_20948
+// ICM-20948 (TDK InvenSense). Sucesor industrial del MPU-9250 (en producción).
+// Registros bancarios igual que ICM-42688: REG_BANK_SEL selecciona banco 0..3.
+// AK09916 magnetómetro integrado (no AK8963), accesible vía bypass I²C @ 0x0C.
+// I²C 0x68/0x69 autodetect. SIN testear con hardware.
+static uint8_t icm20Addr = 0x68;
+#define ICM20_REG_BANK_SEL       0x7F
+// Bank 0
+#define ICM20_REG_WHO_AM_I       0x00  // 0xEA
+#define ICM20_REG_USER_CTRL      0x03
+#define ICM20_REG_PWR_MGMT_1     0x06
+#define ICM20_REG_PWR_MGMT_2     0x07
+#define ICM20_REG_INT_PIN_CFG    0x0F
+#define ICM20_REG_ACCEL_XOUT_H   0x2D  // 6 bytes accel
+#define ICM20_REG_GYRO_XOUT_H    0x33  // 6 bytes gyro
+#define ICM20_REG_TEMP_OUT_H     0x39  // 2 bytes temp
+// Bank 2
+#define ICM20_REG_GYRO_CONFIG_1  0x01  // FS_SEL bits[2:1], DLPF bits[5:3], enable bit 0
+#define ICM20_REG_ACCEL_CONFIG   0x14  // FS bits[2:1], DLPF, enable
+#define ICM20_WHO_AM_I_VAL       0xEA
+
+// AK09916 (mag interno del package)
+#define AK09916_ADDR             0x0C
+#define AK09916_REG_WIA2         0x01  // 0x09
+#define AK09916_REG_CNTL2        0x31  // modo continuo
+#define AK09916_REG_HXL          0x11  // 6 bytes little-endian: x_L, x_H, y_L, y_H, z_L, z_H
+#define AK09916_REG_ST2          0x18  // necesario leer para liberar buffer
+#define AK09916_WIA2_VAL         0x09
+
+// FS gyro ±2000 dps → 16.4 LSB/dps. FS accel ±16g → 2048 LSB/g.
+// AK09916 mag: 0.15 µT/LSB.
+static const float ICM20_GYRO_SENS_DPS  = 1.0f / 16.4f;
+static const float ICM20_ACCEL_SENS_MS2 = 9.80665f / 2048.0f;
+static const float AK09916_MAG_SENS_UT  = 0.15f;
+#endif
+
 // Filtro de fusión
 Adafruit_Madgwick filter;
 
@@ -288,6 +329,8 @@ static CalState calState = {};
   static const uint32_t CAL_PREHEAT_MS = 20000;
 #elif SENSOR_DRIVER == ITG_ADXL_HMC
   static const uint32_t CAL_PREHEAT_MS = 45000;
+#elif SENSOR_DRIVER == ICM_20948
+  static const uint32_t CAL_PREHEAT_MS = 20000;
 #else
   static const uint32_t CAL_PREHEAT_MS = 60000;
 #endif
@@ -960,6 +1003,107 @@ float itgReadTempC() {
 }
 #endif  // SENSOR_DRIVER == ITG_ADXL_HMC
 
+// ─────────── Driver ICM-20948 (SIN testear con hardware) ───────────
+#if SENSOR_DRIVER == ICM_20948
+bool icm20ReadBytes(uint8_t addr, uint8_t reg, uint8_t* out, uint8_t n) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((int)addr, (int)n) != n) return false;
+  for (uint8_t i = 0; i < n; i++) out[i] = Wire.read();
+  return true;
+}
+
+// Helper: cambiar el banco activo del ICM-20948. Registros distintos viven
+// en bancos distintos; hay que conmutar antes de leer/escribir.
+bool icm20SetBank(uint8_t bank) {
+  return writeReg8(icm20Addr, ICM20_REG_BANK_SEL, (uint8_t)(bank << 4));
+}
+
+bool icm20Init() {
+  delay(20);
+  const uint8_t candidates[] = { 0x68, 0x69 };
+  bool found = false;
+  for (uint8_t a : candidates) {
+    // WHO_AM_I siempre legible desde bank 0; setBank antes para asegurar estado.
+    if (!writeReg8(a, ICM20_REG_BANK_SEL, 0x00)) continue;
+    int v = readReg8(a, ICM20_REG_WHO_AM_I);
+    if (v == ICM20_WHO_AM_I_VAL) { icm20Addr = a; found = true; break; }
+  }
+  if (!found) return false;
+
+  // Bank 0: salir de sleep, clock auto-select.
+  if (!icm20SetBank(0)) return false;
+  if (!writeReg8(icm20Addr, ICM20_REG_PWR_MGMT_1, 0x01)) return false; // wake + auto-clock
+  delay(20);
+  // PWR_MGMT_2 = 0x00: enable gyro + accel todos los ejes.
+  if (!writeReg8(icm20Addr, ICM20_REG_PWR_MGMT_2, 0x00)) return false;
+
+  // Habilitar bypass I²C para que el AK09916 sea direccionable directo en 0x0C.
+  if (!writeReg8(icm20Addr, ICM20_REG_INT_PIN_CFG, 0x02)) return false;
+  if (!writeReg8(icm20Addr, ICM20_REG_USER_CTRL, 0x00)) return false; // master I²C OFF
+
+  // Bank 2: configurar escala.
+  if (!icm20SetBank(2)) return false;
+  // GYRO_CONFIG_1: FS_SEL=3 (±2000 dps) bits[2:1]=11, DLPF=0, enable=1.
+  if (!writeReg8(icm20Addr, ICM20_REG_GYRO_CONFIG_1, 0x07)) return false;
+  // ACCEL_CONFIG: FS=3 (±16g) bits[2:1]=11, DLPF=0, enable=1.
+  if (!writeReg8(icm20Addr, ICM20_REG_ACCEL_CONFIG, 0x07)) return false;
+  // Volver a bank 0 para las lecturas de datos.
+  if (!icm20SetBank(0)) return false;
+  delay(10);
+
+  // AK09916: modo continuo 100 Hz (CNTL2 = 0x08). WIA2 sanity check.
+  int wia2 = readReg8(AK09916_ADDR, AK09916_REG_WIA2);
+  if (wia2 == AK09916_WIA2_VAL) {
+    writeReg8(AK09916_ADDR, AK09916_REG_CNTL2, 0x08);
+    delay(10);
+  }
+  return true;
+}
+
+bool icm20Read(float& gx, float& gy, float& gz,
+               float& ax, float& ay, float& az,
+               float& mx, float& my, float& mz) {
+  uint8_t a[6], g[6];
+  if (!icm20ReadBytes(icm20Addr, ICM20_REG_ACCEL_XOUT_H, a, 6)) return false;
+  if (!icm20ReadBytes(icm20Addr, ICM20_REG_GYRO_XOUT_H, g, 6)) return false;
+  int16_t rax = (int16_t)((a[0] << 8) | a[1]);
+  int16_t ray = (int16_t)((a[2] << 8) | a[3]);
+  int16_t raz = (int16_t)((a[4] << 8) | a[5]);
+  int16_t rgx = (int16_t)((g[0] << 8) | g[1]);
+  int16_t rgy = (int16_t)((g[2] << 8) | g[3]);
+  int16_t rgz = (int16_t)((g[4] << 8) | g[5]);
+  gx = rgx * ICM20_GYRO_SENS_DPS * 0.0174532925f;
+  gy = rgy * ICM20_GYRO_SENS_DPS * 0.0174532925f;
+  gz = rgz * ICM20_GYRO_SENS_DPS * 0.0174532925f;
+  ax = rax * ICM20_ACCEL_SENS_MS2;
+  ay = ray * ICM20_ACCEL_SENS_MS2;
+  az = raz * ICM20_ACCEL_SENS_MS2;
+
+  // AK09916 via bypass. Mantener orden: HXL..HZH (little-endian) + ST2 para
+  // liberar buffer. Si la lectura falla, devolver NaN — fusión cae a 6-DOF.
+  uint8_t m[7];
+  if (icm20ReadBytes(AK09916_ADDR, AK09916_REG_HXL, m, 7)) {
+    int16_t rmx = (int16_t)((m[1] << 8) | m[0]);
+    int16_t rmy = (int16_t)((m[3] << 8) | m[2]);
+    int16_t rmz = (int16_t)((m[5] << 8) | m[4]);
+    mx = rmx * AK09916_MAG_SENS_UT;
+    my = rmy * AK09916_MAG_SENS_UT;
+    mz = rmz * AK09916_MAG_SENS_UT;
+  } else { mx = my = mz = NAN; }
+  return true;
+}
+
+// ICM-20948 TEMP_OUT_H/L en 0x39/0x3A (bank 0). Tempc = (raw - 21) / 333.87 + 21.
+float icm20ReadTempC() {
+  uint8_t b[2];
+  if (!icm20ReadBytes(icm20Addr, ICM20_REG_TEMP_OUT_H, b, 2)) return NAN;
+  int16_t raw = (int16_t)((b[0] << 8) | b[1]);
+  return ((float)raw - 21.0f) / 333.87f + 21.0f;
+}
+#endif  // SENSOR_DRIVER == ICM_20948
+
 void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
   delay(100);
@@ -1071,6 +1215,20 @@ void setup() {
     Serial.println("No HW-579 detected (revisar ITG y ADXL al menos)");
     while (1) delay(10);
   }
+#elif SENSOR_DRIVER == ICM_20948
+  {
+    if (writeReg8(icm20Addr, ICM20_REG_BANK_SEL, 0x00)) {
+      int who = readReg8(icm20Addr, ICM20_REG_WHO_AM_I);
+      Serial.print("Gyro WHO_AM_I @0x"); Serial.print(icm20Addr, HEX);
+      Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
+      Serial.print(who, HEX); Serial.println(" (ICM-20948)");
+    }
+  }
+  Serial.println("Initializing ICM-20948...");
+  if (!icm20Init()) {
+    Serial.println("No ICM-20948 detected");
+    while (1) delay(10);
+  }
 #endif
 
   filter.begin(SAMPLE_RATE_HZ);
@@ -1148,6 +1306,9 @@ void sampleAndFuse() {
   // Si HMC no respondió al init, hmcReadMag falla → mag queda NaN y la
   // fusión cae a 6-DOF automáticamente.
   if (!hmcReadMag(mx_uT, my_uT, mz_uT)) { mx_uT = my_uT = mz_uT = NAN; }
+
+#elif SENSOR_DRIVER == ICM_20948
+  icm20Read(gx_rad, gy_rad, gz_rad, ax_ms2, ay_ms2, az_ms2, mx_uT, my_uT, mz_uT);
 #endif
 
   // Bias + conversión a °/s
@@ -1337,6 +1498,13 @@ void handleCommand(String command) {
     Serial.print("Gyro WHO_AM_I @0x"); Serial.print(itgAddr, HEX);
     Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
     Serial.print(who, HEX); Serial.println(" (ITG-3205)");
+#elif SENSOR_DRIVER == ICM_20948
+    if (writeReg8(icm20Addr, ICM20_REG_BANK_SEL, 0x00)) {
+      int who = readReg8(icm20Addr, ICM20_REG_WHO_AM_I);
+      Serial.print("Gyro WHO_AM_I @0x"); Serial.print(icm20Addr, HEX);
+      Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
+      Serial.print(who, HEX); Serial.println(" (ICM-20948)");
+    }
 #endif
   } else if (command == "RESET") {
     Serial.println("Reiniciando...");
@@ -1369,6 +1537,9 @@ void handleCommand(String command) {
   static const uint32_t CAL_SAMPLE_DELAY_MS = 5;
 #elif SENSOR_DRIVER == ITG_ADXL_HMC
   static const float CAL_MOTION_LIMIT_DPS = 1.5f;  // ITG-3205, ruido ~0.5 °/s
+  static const uint32_t CAL_SAMPLE_DELAY_MS = 5;
+#elif SENSOR_DRIVER == ICM_20948
+  static const float CAL_MOTION_LIMIT_DPS = 0.6f;  // gyro de la familia ICM, ruido bajo
   static const uint32_t CAL_SAMPLE_DELAY_MS = 5;
 #endif
 
@@ -1445,6 +1616,9 @@ void calibrateIMU(bool force) {
 #elif SENSOR_DRIVER == ITG_ADXL_HMC
     itgRead(grx, gry, grz);
     adxlReadAccel(ax, ay, az);
+#elif SENSOR_DRIVER == ICM_20948
+    float mx_dummy, my_dummy, mz_dummy;
+    icm20Read(grx, gry, grz, ax, ay, az, mx_dummy, my_dummy, mz_dummy);
 #endif
     sx += grx; sy += gry; sz += grz;
     sxx += (double)grx * grx;
@@ -1552,6 +1726,8 @@ void calibrateIMU(bool force) {
   tempC = mpu6050ReadTempC();
 #elif SENSOR_DRIVER == ITG_ADXL_HMC
   tempC = itgReadTempC();
+#elif SENSOR_DRIVER == ICM_20948
+  tempC = icm20ReadTempC();
 #endif
   calState.schema_version = 1;
   calState.bias_xyz[0] = gx_bias;
@@ -1706,6 +1882,16 @@ bool readMagRaw(float& mx, float& my, float& mz) {
   return true;
 #elif SENSOR_DRIVER == ITG_ADXL_HMC
   return hmcReadMag(mx, my, mz);
+#elif SENSOR_DRIVER == ICM_20948
+  uint8_t m[7];
+  if (!icm20ReadBytes(AK09916_ADDR, AK09916_REG_HXL, m, 7)) return false;
+  int16_t rmx = (int16_t)((m[1] << 8) | m[0]);
+  int16_t rmy = (int16_t)((m[3] << 8) | m[2]);
+  int16_t rmz = (int16_t)((m[5] << 8) | m[4]);
+  mx = rmx * AK09916_MAG_SENS_UT;
+  my = rmy * AK09916_MAG_SENS_UT;
+  mz = rmz * AK09916_MAG_SENS_UT;
+  return true;
 #else
   // Sin magnetómetro físicamente accesible.
   (void)mx; (void)my; (void)mz;

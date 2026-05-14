@@ -70,6 +70,19 @@ con hardware o se cambie el código.
   - [ ] Implementar driver raw I²C (clon del MPU-9250 sin el AK8963).
   - [ ] Validar con módulo GY-521 o similar.
 
+### `ICM_20948`
+
+- **Estado**: a validar con hardware.
+- **Rol**: sucesor industrial del MPU-9250 (en producción TDK). Recomendado
+  por sobre MPU-9250 para nuevos diseños.
+- **Magnetómetro**: AK09916 integrado en el package (no AK8963). Mapping
+  similar pero registros distintos (HXL en 0x11 little-endian, no 0x03).
+- **TODO**:
+  - [ ] Validar con módulo físico (autodetect 0x68/0x69, banks 0/2).
+  - [ ] Aplicar calibración de fábrica del AK09916 si se necesita
+        ±10% extra de precisión del mag.
+  - [ ] Considerar SPI cuando se busque ODR > 1 kHz.
+
 ### `ITG_ADXL_HMC` (HW-579)
 
 - **Estado**: a implementar.
