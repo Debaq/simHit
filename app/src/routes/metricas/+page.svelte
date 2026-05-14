@@ -1,6 +1,7 @@
 <script lang="ts">
   import TopBar from '$lib/components/TopBar.svelte';
   import AxesWizard from '$lib/components/AxesWizard.svelte';
+  import HwValidationCard from '$lib/components/HwValidationCard.svelte';
   import { serial } from '$lib/serial.svelte';
   import { capture } from '$lib/capture.svelte';
   import { analysis } from '$lib/analysis.svelte';
@@ -877,6 +878,12 @@
             </ul>
           </div>
         </div>
+
+        {#if serial.connected && serial.detectedSensor}
+          <div class="card" style="margin-top: 16px;">
+            <HwValidationCard reference={referenceData} />
+          </div>
+        {/if}
       </section>
 
     <!-- ─────────────── STEP 3: CAPTURE ─────────────── -->
