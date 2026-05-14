@@ -39,7 +39,16 @@ jobs:
           # solo por WHO_AM_I y eso lo hace el firmware en runtime.
           - slug: l3g-lsm303
             macro: L3G_LSM303
-            label: 'Compilar — L3G (todas las variantes) + LSM303 [default]'
+            label: 'Compilar — L3G + LSM303 [default, validado]'
+          - slug: icm-42688
+            macro: ICM_42688
+            label: 'Compilar — ICM-42688 [sin testear con hardware]'
+          - slug: mpu9250
+            macro: MPU9250
+            label: 'Compilar — MPU-9250 [sin testear con hardware]'
+          - slug: bno055
+            macro: BNO055
+            label: 'Compilar — BNO055 [sin testear con hardware]'
 
     env:
       FQBN: esp32:esp32:XIAO_ESP32C3
@@ -163,9 +172,12 @@ jobs:
             Este Release incluye un `.bin` por driver de sensor soportado.
             Use el que corresponda al IMU instalado en su gafa:
 
-            | Sensor IMU | Archivo |
-            |---|---|
-            | L3G (todas las variantes) + LSM303 _(default)_ | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-l3g-lsm303.merged.bin` |
+            | Sensor IMU | Archivo | Estado |
+            |---|---|---|
+            | L3G (todas las variantes) + LSM303 _(default)_ | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-l3g-lsm303.merged.bin` | ✓ validado en hardware |
+            | ICM-42688 | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-icm-42688.merged.bin` | ⚠ sin testear |
+            | MPU-9250 + AK8963 | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-mpu9250.merged.bin` | ⚠ sin testear |
+            | BNO055 (fusión interna) | `simhit-fw-${{ steps.ver.outputs.version }}-esp32c3-bno055.merged.bin` | ⚠ sin testear |
 
             **Board:** `${{ env.FQBN }}` (ESP32-C3 SuperMini)
 

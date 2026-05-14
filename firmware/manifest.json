@@ -6,7 +6,29 @@
       "label": "L3G (L3GD20H / L3GD20 / L3G4200D) + LSM303",
       "families": ["L3GD20H", "L3GD20", "L3G4200D"],
       "who_am_i": ["0xD7", "0xD4", "0xD3"],
+      "validated": true,
       "default": true
+    },
+    {
+      "slug": "icm-42688",
+      "label": "ICM-42688 (sin testear)",
+      "families": ["ICM-42688"],
+      "who_am_i": ["0x47"],
+      "validated": false
+    },
+    {
+      "slug": "mpu9250",
+      "label": "MPU-9250 + AK8963 (sin testear)",
+      "families": ["MPU9250"],
+      "who_am_i": ["0x71"],
+      "validated": false
+    },
+    {
+      "slug": "bno055",
+      "label": "BNO055 (sin testear)",
+      "families": ["BNO055"],
+      "who_am_i": ["0xA0"],
+      "validated": false
     }
   ],
   "latest": {

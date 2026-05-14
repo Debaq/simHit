@@ -44,15 +44,34 @@
 //   2) Implementar las funciones del driver con #if SENSOR_DRIVER == <NEW>
 //   3) Agregar la entrada a strategy.matrix.sensor en firmware-release.yml.
 #define L3G_LSM303 1
-// #define ICM_42688  2   // pendiente
-// #define MPU9250    3   // pendiente
-// #define BNO055     4   // pendiente
+#define ICM_42688  2
+#define MPU9250    3
+#define BNO055     4
 
 #ifndef SENSOR_DRIVER
   #define SENSOR_DRIVER L3G_LSM303
 #endif
-#if SENSOR_DRIVER != L3G_LSM303
-  #error "SENSOR_DRIVER aún no soportado. Implementar el bloque correspondiente en este archivo."
+
+// Banderas de capacidades del driver activo. Permiten que el resto del
+// firmware decida si calibrar magnetómetro o leer la aceleración lineal.
+#if SENSOR_DRIVER == L3G_LSM303
+  #define IMU_HAS_MAG 1
+  #define IMU_HAS_ACCEL 1
+  #define IMU_NAME_LITERAL "L3G + LSM303"
+#elif SENSOR_DRIVER == ICM_42688
+  #define IMU_HAS_MAG 0
+  #define IMU_HAS_ACCEL 1
+  #define IMU_NAME_LITERAL "ICM-42688"
+#elif SENSOR_DRIVER == MPU9250
+  #define IMU_HAS_MAG 1
+  #define IMU_HAS_ACCEL 1
+  #define IMU_NAME_LITERAL "MPU-9250"
+#elif SENSOR_DRIVER == BNO055
+  #define IMU_HAS_MAG 1
+  #define IMU_HAS_ACCEL 1
+  #define IMU_NAME_LITERAL "BNO055"
+#else
+  #error "SENSOR_DRIVER no reconocido. Valores válidos: L3G_LSM303 | ICM_42688 | MPU9250 | BNO055"
 #endif
 
 #define I2C_SDA_PIN 6
@@ -65,6 +84,7 @@
 #define SAMPLE_RATE_HZ 200.0f
 static const uint32_t SAMPLE_PERIOD_US = (uint32_t)(1000000.0f / SAMPLE_RATE_HZ);
 
+#if SENSOR_DRIVER == L3G_LSM303
 // L3G4200D — driver mínimo por registros (la librería Adafruit es para L3GD20).
 #define L3G_ADDR        0x69
 #define L3G_WHO_AM_I    0x0F
@@ -77,6 +97,70 @@ static const float L3G_SENS_RAD = 0.070f * 0.0174532925f; // ~1.2217e-3
 // LSM303DLHC accel + mag
 Adafruit_LSM303_Accel_Unified   accelSensor = Adafruit_LSM303_Accel_Unified(30301);
 Adafruit_LSM303DLH_Mag_Unified  magSensor   = Adafruit_LSM303DLH_Mag_Unified(30302);
+#endif
+
+#if SENSOR_DRIVER == ICM_42688
+// ICM-42688-P (TDK InvenSense). I2C 0x68 (AD0=0) o 0x69 (AD0=1).
+// Datasheet rev 1.6. SIN testear con hardware; revisar antes del primer flash.
+#define ICM_ADDR             0x68
+#define ICM_REG_BANK_SEL     0x76
+#define ICM_REG_WHO_AM_I     0x75
+#define ICM_REG_PWR_MGMT0    0x4E
+#define ICM_REG_GYRO_CONFIG0 0x4F
+#define ICM_REG_ACCEL_CONFIG0 0x50
+#define ICM_REG_ACCEL_DATA_X1 0x1F   // bytes [accelX_H..accelZ_L..gyroX_H..gyroZ_L..temp_H..temp_L]
+#define ICM_WHO_AM_I_VAL     0x47
+// FS gyro ±2000 dps → 16.4 LSB/dps → 1/16.4 = 0.0609756 dps/LSB → 0.001064 rad/s/LSB
+static const float ICM_GYRO_SENS_DPS = 1.0f / 16.4f;
+// FS accel ±16g → 2048 LSB/g
+static const float ICM_ACCEL_SENS_G  = 1.0f / 2048.0f;
+#endif
+
+#if SENSOR_DRIVER == MPU9250
+// MPU-9250 (InvenSense, retirado pero abundante). I2C 0x68 (AD0=0) o 0x69 (AD0=1).
+// AK8963 magnetómetro en 0x0C (accesible vía bypass). SIN testear con hardware.
+#define MPU_ADDR             0x68
+#define MPU_REG_PWR_MGMT_1   0x6B
+#define MPU_REG_PWR_MGMT_2   0x6C
+#define MPU_REG_GYRO_CONFIG  0x1B
+#define MPU_REG_ACCEL_CONFIG 0x1C
+#define MPU_REG_INT_PIN_CFG  0x37
+#define MPU_REG_USER_CTRL    0x6A
+#define MPU_REG_ACCEL_XOUT_H 0x3B  // bytes [ax_H,ax_L,ay,az,temp,gx,gy,gz]
+#define MPU_REG_WHO_AM_I     0x75
+#define MPU_WHO_AM_I_VAL     0x71
+#define AK8963_ADDR          0x0C
+#define AK8963_REG_CNTL1     0x0A
+#define AK8963_REG_DATA_X_L  0x03   // bytes [x_L,x_H,y_L,y_H,z_L,z_H,ST2]
+#define AK8963_WHO_AM_I_VAL  0x48
+// FS gyro ±2000 dps → 16.4 LSB/dps
+static const float MPU_GYRO_SENS_DPS = 1.0f / 16.4f;
+// FS accel ±16g → 2048 LSB/g, salida en m/s²
+static const float MPU_ACCEL_SENS_MS2 = 9.80665f / 2048.0f;
+// AK8963 (modo 16-bit): 0.15 µT/LSB
+static const float AK8963_MAG_SENS_UT = 0.15f;
+#endif
+
+#if SENSOR_DRIVER == BNO055
+// BNO055 (Bosch). I2C 0x28 (default) o 0x29 (con ADR pin high).
+// Fusión interna (NDOF) — no requiere Madgwick. Le pedimos al chip directamente
+// los Euler angles y la velocidad angular. SIN testear con hardware.
+#define BNO_ADDR             0x28
+#define BNO_REG_CHIP_ID      0x00
+#define BNO_REG_OPR_MODE     0x3D
+#define BNO_REG_PWR_MODE     0x3E
+#define BNO_REG_PAGE_ID      0x07
+#define BNO_REG_UNIT_SEL     0x3B
+#define BNO_REG_EUL_DATA     0x1A  // 6 bytes: heading,roll,pitch (little endian)
+#define BNO_REG_GYR_DATA     0x14  // 6 bytes: x,y,z (little endian)
+#define BNO_REG_ACC_DATA     0x08  // 6 bytes: x,y,z (little endian)
+#define BNO_OPR_MODE_NDOF    0x0C
+#define BNO_CHIP_ID_VAL      0xA0
+// Eulers: 1/16 °/LSB. Gyro: 16 LSB/dps. Accel: 100 LSB/(m/s²).
+static const float BNO_EUL_SENS_DEG = 1.0f / 16.0f;
+static const float BNO_GYR_SENS_DPS = 1.0f / 16.0f;
+static const float BNO_ACC_SENS_MS2 = 1.0f / 100.0f;
+#endif
 
 // Filtro de fusión
 Adafruit_Madgwick filter;
@@ -265,6 +349,7 @@ bool writeReg8(uint8_t addr, uint8_t reg, uint8_t val) {
   return Wire.endTransmission() == 0;
 }
 
+#if SENSOR_DRIVER == L3G_LSM303
 // Inicializa el L3G4200D a ±2000 dps, ODR 800 Hz, BW 50 Hz, BDU on.
 bool l3gInit() {
   int who = readReg8(L3G_ADDR, L3G_WHO_AM_I);
@@ -319,6 +404,182 @@ void scanGyroWhoAmI() {
     Serial.println(name);
   }
 }
+#endif  // SENSOR_DRIVER == L3G_LSM303
+
+// ─────────── Driver ICM-42688 (SIN testear con hardware) ───────────
+#if SENSOR_DRIVER == ICM_42688
+// Lee N bytes consecutivos a partir de `reg` desde el dispositivo `addr`.
+bool icmReadBytes(uint8_t addr, uint8_t reg, uint8_t* out, uint8_t n) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((int)addr, (int)n) != n) return false;
+  for (uint8_t i = 0; i < n; i++) out[i] = Wire.read();
+  return true;
+}
+
+bool icmInit() {
+  delay(5);
+  int who = readReg8(ICM_ADDR, ICM_REG_WHO_AM_I);
+  if (who != ICM_WHO_AM_I_VAL) return false;
+  // Bank 0 (registros configurables principales).
+  if (!writeReg8(ICM_ADDR, ICM_REG_BANK_SEL, 0x00)) return false;
+  // PWR_MGMT0: gyro low-noise + accel low-noise (bits[3:0] = 0x0F).
+  if (!writeReg8(ICM_ADDR, ICM_REG_PWR_MGMT0, 0x0F)) return false;
+  delay(50); // gyro start-up ≥45 ms
+  // GYRO_CONFIG0: FS_SEL=0 (±2000 dps), ODR=0x06 (1 kHz). bits = 000 0 0110.
+  if (!writeReg8(ICM_ADDR, ICM_REG_GYRO_CONFIG0, 0x06)) return false;
+  // ACCEL_CONFIG0: FS_SEL=0 (±16g), ODR=0x06 (1 kHz). bits = 000 0 0110.
+  if (!writeReg8(ICM_ADDR, ICM_REG_ACCEL_CONFIG0, 0x06)) return false;
+  return true;
+}
+
+// Lee gyro y accel del ICM. gyro en rad/s, accel en m/s². Retorna false en error.
+bool icmRead(float& gx, float& gy, float& gz, float& ax, float& ay, float& az) {
+  uint8_t b[12];
+  // Burst: ACCEL_DATA_X1..ACCEL_DATA_Z0 (6) + GYRO_DATA_X1..Z0 (6) = 12 bytes
+  // Direcciones consecutivas: 0x1F..0x2A.
+  if (!icmReadBytes(ICM_ADDR, ICM_REG_ACCEL_DATA_X1, b, 12)) return false;
+  int16_t rax = (int16_t)((b[0] << 8) | b[1]);
+  int16_t ray = (int16_t)((b[2] << 8) | b[3]);
+  int16_t raz = (int16_t)((b[4] << 8) | b[5]);
+  int16_t rgx = (int16_t)((b[6] << 8) | b[7]);
+  int16_t rgy = (int16_t)((b[8] << 8) | b[9]);
+  int16_t rgz = (int16_t)((b[10] << 8) | b[11]);
+  gx = rgx * ICM_GYRO_SENS_DPS * 0.0174532925f;
+  gy = rgy * ICM_GYRO_SENS_DPS * 0.0174532925f;
+  gz = rgz * ICM_GYRO_SENS_DPS * 0.0174532925f;
+  ax = rax * ICM_ACCEL_SENS_G * 9.80665f;
+  ay = ray * ICM_ACCEL_SENS_G * 9.80665f;
+  az = raz * ICM_ACCEL_SENS_G * 9.80665f;
+  return true;
+}
+#endif  // SENSOR_DRIVER == ICM_42688
+
+// ─────────── Driver MPU-9250 (SIN testear con hardware) ───────────
+#if SENSOR_DRIVER == MPU9250
+bool mpuReadBytes(uint8_t addr, uint8_t reg, uint8_t* out, uint8_t n) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((int)addr, (int)n) != n) return false;
+  for (uint8_t i = 0; i < n; i++) out[i] = Wire.read();
+  return true;
+}
+
+bool mpuInit() {
+  delay(50);
+  int who = readReg8(MPU_ADDR, MPU_REG_WHO_AM_I);
+  if (who != MPU_WHO_AM_I_VAL) return false;
+  // Wake up (PWR_MGMT_1 = 0x00, sale de sleep, clock interno).
+  if (!writeReg8(MPU_ADDR, MPU_REG_PWR_MGMT_1, 0x00)) return false;
+  delay(20);
+  // PLL on, gyro como ref.
+  if (!writeReg8(MPU_ADDR, MPU_REG_PWR_MGMT_1, 0x01)) return false;
+  // Gyro ±2000 dps: FS_SEL=11 → bits[4:3]=11 → 0x18.
+  if (!writeReg8(MPU_ADDR, MPU_REG_GYRO_CONFIG, 0x18)) return false;
+  // Accel ±16g: AFS_SEL=11 → bits[4:3]=11 → 0x18.
+  if (!writeReg8(MPU_ADDR, MPU_REG_ACCEL_CONFIG, 0x18)) return false;
+  // Bypass para acceder al magnetómetro AK8963 directamente.
+  if (!writeReg8(MPU_ADDR, MPU_REG_USER_CTRL, 0x00)) return false;
+  if (!writeReg8(MPU_ADDR, MPU_REG_INT_PIN_CFG, 0x02)) return false;
+  delay(10);
+  // AK8963: modo continuous-2 (100 Hz) + 16-bit.
+  writeReg8(AK8963_ADDR, AK8963_REG_CNTL1, 0x16);
+  delay(10);
+  return true;
+}
+
+bool mpuRead(float& gx, float& gy, float& gz, float& ax, float& ay, float& az,
+             float& mx, float& my, float& mz) {
+  uint8_t b[14];
+  if (!mpuReadBytes(MPU_ADDR, MPU_REG_ACCEL_XOUT_H, b, 14)) return false;
+  int16_t rax = (int16_t)((b[0] << 8) | b[1]);
+  int16_t ray = (int16_t)((b[2] << 8) | b[3]);
+  int16_t raz = (int16_t)((b[4] << 8) | b[5]);
+  // b[6..7] = temp (ignorada)
+  int16_t rgx = (int16_t)((b[8]  << 8) | b[9]);
+  int16_t rgy = (int16_t)((b[10] << 8) | b[11]);
+  int16_t rgz = (int16_t)((b[12] << 8) | b[13]);
+  gx = rgx * MPU_GYRO_SENS_DPS * 0.0174532925f;
+  gy = rgy * MPU_GYRO_SENS_DPS * 0.0174532925f;
+  gz = rgz * MPU_GYRO_SENS_DPS * 0.0174532925f;
+  ax = rax * MPU_ACCEL_SENS_MS2;
+  ay = ray * MPU_ACCEL_SENS_MS2;
+  az = raz * MPU_ACCEL_SENS_MS2;
+
+  // Magnetómetro AK8963 (separado): leer DATA_X_L..ST2 (7 bytes). ST2 lectura
+  // necesaria para liberar el buffer. Si falta, devolver ceros sin error.
+  uint8_t m[7];
+  if (mpuReadBytes(AK8963_ADDR, AK8963_REG_DATA_X_L, m, 7)) {
+    int16_t rmx = (int16_t)((m[1] << 8) | m[0]);
+    int16_t rmy = (int16_t)((m[3] << 8) | m[2]);
+    int16_t rmz = (int16_t)((m[5] << 8) | m[4]);
+    mx = rmx * AK8963_MAG_SENS_UT;
+    my = rmy * AK8963_MAG_SENS_UT;
+    mz = rmz * AK8963_MAG_SENS_UT;
+  } else { mx = my = mz = 0.0f; }
+  return true;
+}
+#endif  // SENSOR_DRIVER == MPU9250
+
+// ─────────── Driver BNO055 (SIN testear con hardware) ───────────
+#if SENSOR_DRIVER == BNO055
+bool bnoReadBytes(uint8_t reg, uint8_t* out, uint8_t n) {
+  Wire.beginTransmission(BNO_ADDR);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((int)BNO_ADDR, (int)n) != n) return false;
+  for (uint8_t i = 0; i < n; i++) out[i] = Wire.read();
+  return true;
+}
+
+bool bnoInit() {
+  delay(700); // POR del BNO055: ~650 ms hasta que responde
+  int who = readReg8(BNO_ADDR, BNO_REG_CHIP_ID);
+  if (who != BNO_CHIP_ID_VAL) return false;
+  // Forzar config mode antes de cambiar registros.
+  writeReg8(BNO_ADDR, BNO_REG_OPR_MODE, 0x00);
+  delay(25);
+  writeReg8(BNO_ADDR, BNO_REG_PAGE_ID, 0x00);
+  // UNIT_SEL: m/s² para accel, dps para gyro, °C, ángulos en grados.
+  writeReg8(BNO_ADDR, BNO_REG_UNIT_SEL, 0x00);
+  // Pasar a modo NDOF (9-DOF fusion completo con magnetómetro).
+  writeReg8(BNO_ADDR, BNO_REG_OPR_MODE, BNO_OPR_MODE_NDOF);
+  delay(25);
+  return true;
+}
+
+// Lee ángulos Euler (heading=yaw, roll, pitch) + gyro + accel. El BNO055
+// hace su propia fusión: usamos sus eulers directamente y bypaseamos Madgwick.
+bool bnoRead(float& yaw_deg, float& roll_deg, float& pitch_deg,
+             float& gx_rad, float& gy_rad, float& gz_rad,
+             float& ax_ms2, float& ay_ms2, float& az_ms2) {
+  uint8_t eul[6], gyr[6], acc[6];
+  if (!bnoReadBytes(BNO_REG_EUL_DATA, eul, 6)) return false;
+  if (!bnoReadBytes(BNO_REG_GYR_DATA, gyr, 6)) return false;
+  if (!bnoReadBytes(BNO_REG_ACC_DATA, acc, 6)) return false;
+  int16_t h = (int16_t)((eul[1] << 8) | eul[0]);
+  int16_t r = (int16_t)((eul[3] << 8) | eul[2]);
+  int16_t p = (int16_t)((eul[5] << 8) | eul[4]);
+  yaw_deg   = h * BNO_EUL_SENS_DEG;
+  roll_deg  = r * BNO_EUL_SENS_DEG;
+  pitch_deg = p * BNO_EUL_SENS_DEG;
+  int16_t gx = (int16_t)((gyr[1] << 8) | gyr[0]);
+  int16_t gy = (int16_t)((gyr[3] << 8) | gyr[2]);
+  int16_t gz = (int16_t)((gyr[5] << 8) | gyr[4]);
+  gx_rad = gx * BNO_GYR_SENS_DPS * 0.0174532925f;
+  gy_rad = gy * BNO_GYR_SENS_DPS * 0.0174532925f;
+  gz_rad = gz * BNO_GYR_SENS_DPS * 0.0174532925f;
+  int16_t ax = (int16_t)((acc[1] << 8) | acc[0]);
+  int16_t ay = (int16_t)((acc[3] << 8) | acc[2]);
+  int16_t az = (int16_t)((acc[5] << 8) | acc[4]);
+  ax_ms2 = ax * BNO_ACC_SENS_MS2;
+  ay_ms2 = ay * BNO_ACC_SENS_MS2;
+  az_ms2 = az * BNO_ACC_SENS_MS2;
+  return true;
+}
+#endif  // SENSOR_DRIVER == BNO055
 
 void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
@@ -334,6 +595,7 @@ void setup() {
 
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 400000);
 
+#if SENSOR_DRIVER == L3G_LSM303
   scanGyroWhoAmI();
 
   Serial.println("Initializing L3G4200D...");
@@ -357,6 +619,45 @@ void setup() {
   // satura en -418 μT (0xF000 overflow). Subir el rango evita la saturación.
   magSensor.setMagGain(LSM303_MAGGAIN_8_1);
   Serial.println("Mag gain set to ±8.1 gauss");
+#elif SENSOR_DRIVER == ICM_42688
+  // El banner mantiene formato 'Gyro WHO_AM_I @0xXX = 0xYY (...)' para que el
+  // cliente serial.svelte.ts identifique el sensor sin cambios.
+  {
+    int who = readReg8(ICM_ADDR, ICM_REG_WHO_AM_I);
+    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(ICM_ADDR, HEX);
+    Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
+    Serial.print(who, HEX); Serial.println(" (ICM-42688)");
+  }
+  Serial.println("Initializing ICM-42688...");
+  if (!icmInit()) {
+    Serial.println("No ICM-42688 detected");
+    while (1) delay(10);
+  }
+#elif SENSOR_DRIVER == MPU9250
+  {
+    int who = readReg8(MPU_ADDR, MPU_REG_WHO_AM_I);
+    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(MPU_ADDR, HEX);
+    Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
+    Serial.print(who, HEX); Serial.println(" (MPU9250)");
+  }
+  Serial.println("Initializing MPU-9250...");
+  if (!mpuInit()) {
+    Serial.println("No MPU-9250 detected");
+    while (1) delay(10);
+  }
+#elif SENSOR_DRIVER == BNO055
+  {
+    int who = readReg8(BNO_ADDR, BNO_REG_CHIP_ID);
+    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(BNO_ADDR, HEX);
+    Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
+    Serial.print(who, HEX); Serial.println(" (BNO055)");
+  }
+  Serial.println("Initializing BNO055...");
+  if (!bnoInit()) {
+    Serial.println("No BNO055 detected");
+    while (1) delay(10);
+  }
+#endif
 
   filter.begin(SAMPLE_RATE_HZ);
 
@@ -387,6 +688,7 @@ void loop() {
 // Lee los tres sensores y actualiza el filtro. Mantener el filtro
 // "caliente" aunque IMU OFF para evitar transitorios al activar.
 void sampleAndFuse() {
+#if SENSOR_DRIVER == L3G_LSM303
   sensors_event_t ae, me;
   float grx, gry, grz;
   l3gRead(grx, gry, grz);
@@ -397,39 +699,71 @@ void sampleAndFuse() {
   float gy_dps = radToDeg(gry - gy_bias);
   float gz_dps = radToDeg(grz - gz_bias);
 
-  // Aceleración angular calculada en hardware. dt = 1/SAMPLE_RATE_HZ (5 ms).
   computeAngularAccel(gx_dps, gy_dps, gz_dps, 1.0f / SAMPLE_RATE_HZ);
-  lastGyroDpsX = gx_dps;
-  lastGyroDpsY = gy_dps;
-  lastGyroDpsZ = gz_dps;
-
-  // Aceleración lineal del LSM303 (m/s²). Sin filtro adicional: el sensor
-  // ya filtra internamente. Se almacena para emitIMU().
-  linAccX = ae.acceleration.x;
-  linAccY = ae.acceleration.y;
-  linAccZ = ae.acceleration.z;
+  lastGyroDpsX = gx_dps; lastGyroDpsY = gy_dps; lastGyroDpsZ = gz_dps;
+  linAccX = ae.acceleration.x; linAccY = ae.acceleration.y; linAccZ = ae.acceleration.z;
 
   float mx = (me.magnetic.x - mx_off) * mx_scl;
   float my = (me.magnetic.y - my_off) * my_scl;
   float mz = (me.magnetic.z - mz_off) * mz_scl;
+  (void)mx; (void)my; (void)mz;
+  // 6DOF (sin mag): este módulo LSM303DLHC tiene el eje Z saturado; usar IMU.
+  filter.updateIMU(gx_dps, gy_dps, gz_dps,
+                   ae.acceleration.x, ae.acceleration.y, ae.acceleration.z);
 
-  // 6DOF (sin magnetómetro): este módulo LSM303DLHC tiene el eje Z saturado
-  // (>810 μT incluso con gain máximo ±8.1 G), probablemente IC dañado. Yaw
-  // deriva con el tiempo pero pitch/roll quedan estabilizados por gravedad.
-  // Para vHIT corto + IMU CAL al inicio es suficiente.
-  // Si en el futuro se reemplaza el módulo, descomentar el bloque 9DOF y
-  // comentar el updateIMU para volver a usar magnetómetro.
-  (void)mx; (void)my; (void)mz; // silenciar warnings de variables no usadas
-  filter.updateIMU(
-    gx_dps, gy_dps, gz_dps,
-    ae.acceleration.x, ae.acceleration.y, ae.acceleration.z
-  );
-  // 9DOF original (con magnetómetro) — restaurar si se cambia el LSM303:
-  // filter.update(
-  //   gx_dps, gy_dps, gz_dps,
-  //   ae.acceleration.x, ae.acceleration.y, ae.acceleration.z,
-  //   mx, my, mz
-  // );
+#elif SENSOR_DRIVER == ICM_42688
+  float grx=0, gry=0, grz=0, ax=0, ay=0, az=0;
+  icmRead(grx, gry, grz, ax, ay, az);
+  float gx_dps = radToDeg(grx - gx_bias);
+  float gy_dps = radToDeg(gry - gy_bias);
+  float gz_dps = radToDeg(grz - gz_bias);
+  computeAngularAccel(gx_dps, gy_dps, gz_dps, 1.0f / SAMPLE_RATE_HZ);
+  lastGyroDpsX = gx_dps; lastGyroDpsY = gy_dps; lastGyroDpsZ = gz_dps;
+  linAccX = ax; linAccY = ay; linAccZ = az;
+  filter.updateIMU(gx_dps, gy_dps, gz_dps, ax, ay, az);
+
+#elif SENSOR_DRIVER == MPU9250
+  float grx=0, gry=0, grz=0, ax=0, ay=0, az=0, mx=0, my=0, mz=0;
+  mpuRead(grx, gry, grz, ax, ay, az, mx, my, mz);
+  float gx_dps = radToDeg(grx - gx_bias);
+  float gy_dps = radToDeg(gry - gy_bias);
+  float gz_dps = radToDeg(grz - gz_bias);
+  computeAngularAccel(gx_dps, gy_dps, gz_dps, 1.0f / SAMPLE_RATE_HZ);
+  lastGyroDpsX = gx_dps; lastGyroDpsY = gy_dps; lastGyroDpsZ = gz_dps;
+  linAccX = ax; linAccY = ay; linAccZ = az;
+  // Magnetómetro disponible: usar fusión 9-DOF si la calibración del MAG está hecha.
+  float mxc = (mx - mx_off) * mx_scl;
+  float myc = (my - my_off) * my_scl;
+  float mzc = (mz - mz_off) * mz_scl;
+  filter.update(gx_dps, gy_dps, gz_dps, ax, ay, az, mxc, myc, mzc);
+
+#elif SENSOR_DRIVER == BNO055
+  // BNO055 hace su propia fusión: leemos eulers directamente y no usamos
+  // Madgwick. Forzamos los offsets de orientación a través de los eulers ya
+  // calculados por el BNO. El campo gyro_dps sigue siendo crudo (post-bias).
+  float yaw_d=0, roll_d=0, pitch_d=0;
+  float grx=0, gry=0, grz=0, ax=0, ay=0, az=0;
+  bnoRead(yaw_d, roll_d, pitch_d, grx, gry, grz, ax, ay, az);
+  float gx_dps = radToDeg(grx - gx_bias);
+  float gy_dps = radToDeg(gry - gy_bias);
+  float gz_dps = radToDeg(grz - gz_bias);
+  computeAngularAccel(gx_dps, gy_dps, gz_dps, 1.0f / SAMPLE_RATE_HZ);
+  lastGyroDpsX = gx_dps; lastGyroDpsY = gy_dps; lastGyroDpsZ = gz_dps;
+  linAccX = ax; linAccY = ay; linAccZ = az;
+  // El BNO055 reporta heading [0,360); convertimos a [-180,180] para mantener
+  // la convención de Madgwick del resto del firmware.
+  if (yaw_d > 180.0f) yaw_d -= 360.0f;
+  // Truqueamos Madgwick para reportar estos eulers sin volver a fusionar:
+  // emitIMU() lee filter.getYaw/Pitch/Roll, así que feedeamos una rotación
+  // congruente. Para no reimplementar todo el pipeline, hacemos un init/skip:
+  // efectivamente usamos los eulers del BNO sobrescribiendo offsets.
+  yaw_off   = filter.getYaw()   - yaw_d;
+  pitch_off = filter.getPitch() - pitch_d;
+  roll_off  = filter.getRoll()  - roll_d;
+  // Igual alimentamos Madgwick para mantener la API. La precisión real viene
+  // de los offsets que acabamos de sincronizar contra los eulers del BNO.
+  filter.updateIMU(gx_dps, gy_dps, gz_dps, ax, ay, az);
+#endif
 }
 
 void emitIMU() {
@@ -570,8 +904,16 @@ void calibrateIMU() {
   double sxx = 0, syy = 0, szz = 0;
 
   for (int i = 0; i < numSamples; i++) {
-    float grx, gry, grz;
+    float grx = 0, gry = 0, grz = 0;
+#if SENSOR_DRIVER == L3G_LSM303
     l3gRead(grx, gry, grz);
+#elif SENSOR_DRIVER == ICM_42688
+    float ax, ay, az; icmRead(grx, gry, grz, ax, ay, az);
+#elif SENSOR_DRIVER == MPU9250
+    float ax, ay, az, mx, my, mz; mpuRead(grx, gry, grz, ax, ay, az, mx, my, mz);
+#elif SENSOR_DRIVER == BNO055
+    float yd, rd, pd, ax, ay, az; bnoRead(yd, rd, pd, grx, gry, grz, ax, ay, az);
+#endif
     sx  += grx;  sy  += gry;  sz  += grz;
     sxx += (double)grx * grx;
     syy += (double)gry * gry;
@@ -682,6 +1024,12 @@ struct MagSample { float x, y, z; };
 static MagSample magBuf[MAG_BUF_MAX];
 
 void calibrateMag() {
+#if SENSOR_DRIVER != L3G_LSM303
+  // MAG CAL solo soportado en L3G_LSM303 (única familia con API Adafruit del
+  // magnetómetro). MPU9250 tiene AK8963 pero requiere refactor del flow.
+  Serial.println("MAG CAL not supported - skip");
+  return;
+#else
   bool prev_start = start_imu;
   start_imu = false;
 
@@ -860,6 +1208,7 @@ void calibrateMag() {
   Serial.println(mz_scl, 3);
 
   start_imu = prev_start;
+#endif  // SENSOR_DRIVER != L3G_LSM303
 }
 
 void clearMagCal() {

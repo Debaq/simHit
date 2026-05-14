@@ -30,6 +30,8 @@ export type SupportedSensor = {
   families: string[];     // nombres concretos (p.ej. ['L3GD20H','L3GD20','L3G4200D'])
   who_am_i: string[];
   default?: boolean;
+  // false = el driver está implementado pero nunca fue probado en hardware real.
+  validated?: boolean;
 };
 
 export type FirmwareManifestEntry = {
