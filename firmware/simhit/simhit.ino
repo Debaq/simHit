@@ -38,7 +38,7 @@
 // Versión del firmware. Sincronizar con firmware/manifest.json cada vez que se
 // haga un release. El cliente la usa para chequear actualizaciones contra el
 // manifest del repo.
-#define FW_VERSION_STRING "1.1.0"
+#define FW_VERSION_STRING "1.1.1"
 
 // ──────────────────── Selección del driver de sensor ────────────────────
 // La CI pasa -DSENSOR_DRIVER=<MACRO> al compilador para producir un .bin por
@@ -105,8 +105,8 @@ Adafruit_LSM303DLH_Mag_Unified  magSensor   = Adafruit_LSM303DLH_Mag_Unified(303
 
 #if SENSOR_DRIVER == ICM_42688
 // ICM-42688-P (TDK InvenSense). I2C 0x68 (AD0=0) o 0x69 (AD0=1).
-// Datasheet rev 1.6. SIN testear con hardware; revisar antes del primer flash.
-#define ICM_ADDR             0x68
+// La dirección efectiva se descubre en runtime sondeando ambas (icmInit).
+static uint8_t icmAddr = 0x68;  // se ajusta en icmInit() según WHO_AM_I
 #define ICM_REG_BANK_SEL     0x76
 #define ICM_REG_WHO_AM_I     0x75
 #define ICM_REG_PWR_MGMT0    0x4E
@@ -122,8 +122,8 @@ static const float ICM_ACCEL_SENS_G  = 1.0f / 2048.0f;
 
 #if SENSOR_DRIVER == MPU9250
 // MPU-9250 (InvenSense, retirado pero abundante). I2C 0x68 (AD0=0) o 0x69 (AD0=1).
-// AK8963 magnetómetro en 0x0C (accesible vía bypass). SIN testear con hardware.
-#define MPU_ADDR             0x68
+// AK8963 magnetómetro en 0x0C (accesible vía bypass).
+static uint8_t mpuAddr = 0x68;  // se ajusta en mpuInit()
 #define MPU_REG_PWR_MGMT_1   0x6B
 #define MPU_REG_PWR_MGMT_2   0x6C
 #define MPU_REG_GYRO_CONFIG  0x1B
@@ -147,9 +147,8 @@ static const float AK8963_MAG_SENS_UT = 0.15f;
 
 #if SENSOR_DRIVER == BNO055
 // BNO055 (Bosch). I2C 0x28 (default) o 0x29 (con ADR pin high).
-// Fusión interna (NDOF) — no requiere Madgwick. Le pedimos al chip directamente
-// los Euler angles y la velocidad angular. SIN testear con hardware.
-#define BNO_ADDR             0x28
+// Fusión interna (NDOF) — no requiere Madgwick.
+static uint8_t bnoAddr = 0x28;  // se ajusta en bnoInit()
 #define BNO_REG_CHIP_ID      0x00
 #define BNO_REG_OPR_MODE     0x3D
 #define BNO_REG_PWR_MODE     0x3E
@@ -430,17 +429,24 @@ bool icmReadBytes(uint8_t addr, uint8_t reg, uint8_t* out, uint8_t n) {
 
 bool icmInit() {
   delay(5);
-  int who = readReg8(ICM_ADDR, ICM_REG_WHO_AM_I);
-  if (who != ICM_WHO_AM_I_VAL) return false;
+  // Sondear ambas direcciones I2C posibles. La primera que devuelva el
+  // WHO_AM_I correcto queda fija en icmAddr para el resto de la sesión.
+  const uint8_t candidates[] = { 0x68, 0x69 };
+  bool found = false;
+  for (uint8_t a : candidates) {
+    int v = readReg8(a, ICM_REG_WHO_AM_I);
+    if (v == ICM_WHO_AM_I_VAL) { icmAddr = a; found = true; break; }
+  }
+  if (!found) return false;
   // Bank 0 (registros configurables principales).
-  if (!writeReg8(ICM_ADDR, ICM_REG_BANK_SEL, 0x00)) return false;
+  if (!writeReg8(icmAddr, ICM_REG_BANK_SEL, 0x00)) return false;
   // PWR_MGMT0: gyro low-noise + accel low-noise (bits[3:0] = 0x0F).
-  if (!writeReg8(ICM_ADDR, ICM_REG_PWR_MGMT0, 0x0F)) return false;
+  if (!writeReg8(icmAddr, ICM_REG_PWR_MGMT0, 0x0F)) return false;
   delay(50); // gyro start-up ≥45 ms
   // GYRO_CONFIG0: FS_SEL=0 (±2000 dps), ODR=0x06 (1 kHz). bits = 000 0 0110.
-  if (!writeReg8(ICM_ADDR, ICM_REG_GYRO_CONFIG0, 0x06)) return false;
+  if (!writeReg8(icmAddr, ICM_REG_GYRO_CONFIG0, 0x06)) return false;
   // ACCEL_CONFIG0: FS_SEL=0 (±16g), ODR=0x06 (1 kHz). bits = 000 0 0110.
-  if (!writeReg8(ICM_ADDR, ICM_REG_ACCEL_CONFIG0, 0x06)) return false;
+  if (!writeReg8(icmAddr, ICM_REG_ACCEL_CONFIG0, 0x06)) return false;
   return true;
 }
 
@@ -449,7 +455,7 @@ bool icmRead(float& gx, float& gy, float& gz, float& ax, float& ay, float& az) {
   uint8_t b[12];
   // Burst: ACCEL_DATA_X1..ACCEL_DATA_Z0 (6) + GYRO_DATA_X1..Z0 (6) = 12 bytes
   // Direcciones consecutivas: 0x1F..0x2A.
-  if (!icmReadBytes(ICM_ADDR, ICM_REG_ACCEL_DATA_X1, b, 12)) return false;
+  if (!icmReadBytes(icmAddr, ICM_REG_ACCEL_DATA_X1, b, 12)) return false;
   int16_t rax = (int16_t)((b[0] << 8) | b[1]);
   int16_t ray = (int16_t)((b[2] << 8) | b[3]);
   int16_t raz = (int16_t)((b[4] << 8) | b[5]);
@@ -479,20 +485,25 @@ bool mpuReadBytes(uint8_t addr, uint8_t reg, uint8_t* out, uint8_t n) {
 
 bool mpuInit() {
   delay(50);
-  int who = readReg8(MPU_ADDR, MPU_REG_WHO_AM_I);
-  if (who != MPU_WHO_AM_I_VAL) return false;
+  const uint8_t candidates[] = { 0x68, 0x69 };
+  bool found = false;
+  for (uint8_t a : candidates) {
+    int v = readReg8(a, MPU_REG_WHO_AM_I);
+    if (v == MPU_WHO_AM_I_VAL) { mpuAddr = a; found = true; break; }
+  }
+  if (!found) return false;
   // Wake up (PWR_MGMT_1 = 0x00, sale de sleep, clock interno).
-  if (!writeReg8(MPU_ADDR, MPU_REG_PWR_MGMT_1, 0x00)) return false;
+  if (!writeReg8(mpuAddr, MPU_REG_PWR_MGMT_1, 0x00)) return false;
   delay(20);
   // PLL on, gyro como ref.
-  if (!writeReg8(MPU_ADDR, MPU_REG_PWR_MGMT_1, 0x01)) return false;
+  if (!writeReg8(mpuAddr, MPU_REG_PWR_MGMT_1, 0x01)) return false;
   // Gyro ±2000 dps: FS_SEL=11 → bits[4:3]=11 → 0x18.
-  if (!writeReg8(MPU_ADDR, MPU_REG_GYRO_CONFIG, 0x18)) return false;
+  if (!writeReg8(mpuAddr, MPU_REG_GYRO_CONFIG, 0x18)) return false;
   // Accel ±16g: AFS_SEL=11 → bits[4:3]=11 → 0x18.
-  if (!writeReg8(MPU_ADDR, MPU_REG_ACCEL_CONFIG, 0x18)) return false;
+  if (!writeReg8(mpuAddr, MPU_REG_ACCEL_CONFIG, 0x18)) return false;
   // Bypass para acceder al magnetómetro AK8963 directamente.
-  if (!writeReg8(MPU_ADDR, MPU_REG_USER_CTRL, 0x00)) return false;
-  if (!writeReg8(MPU_ADDR, MPU_REG_INT_PIN_CFG, 0x02)) return false;
+  if (!writeReg8(mpuAddr, MPU_REG_USER_CTRL, 0x00)) return false;
+  if (!writeReg8(mpuAddr, MPU_REG_INT_PIN_CFG, 0x02)) return false;
   delay(10);
   // AK8963: modo continuous-2 (100 Hz) + 16-bit.
   writeReg8(AK8963_ADDR, AK8963_REG_CNTL1, 0x16);
@@ -503,7 +514,7 @@ bool mpuInit() {
 bool mpuRead(float& gx, float& gy, float& gz, float& ax, float& ay, float& az,
              float& mx, float& my, float& mz) {
   uint8_t b[14];
-  if (!mpuReadBytes(MPU_ADDR, MPU_REG_ACCEL_XOUT_H, b, 14)) return false;
+  if (!mpuReadBytes(mpuAddr, MPU_REG_ACCEL_XOUT_H, b, 14)) return false;
   int16_t rax = (int16_t)((b[0] << 8) | b[1]);
   int16_t ray = (int16_t)((b[2] << 8) | b[3]);
   int16_t raz = (int16_t)((b[4] << 8) | b[5]);
@@ -536,26 +547,31 @@ bool mpuRead(float& gx, float& gy, float& gz, float& ax, float& ay, float& az,
 // ─────────── Driver BNO055 (SIN testear con hardware) ───────────
 #if SENSOR_DRIVER == BNO055
 bool bnoReadBytes(uint8_t reg, uint8_t* out, uint8_t n) {
-  Wire.beginTransmission(BNO_ADDR);
+  Wire.beginTransmission(bnoAddr);
   Wire.write(reg);
   if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom((int)BNO_ADDR, (int)n) != n) return false;
+  if (Wire.requestFrom((int)bnoAddr, (int)n) != n) return false;
   for (uint8_t i = 0; i < n; i++) out[i] = Wire.read();
   return true;
 }
 
 bool bnoInit() {
   delay(700); // POR del BNO055: ~650 ms hasta que responde
-  int who = readReg8(BNO_ADDR, BNO_REG_CHIP_ID);
-  if (who != BNO_CHIP_ID_VAL) return false;
+  const uint8_t candidates[] = { 0x28, 0x29 };
+  bool found = false;
+  for (uint8_t a : candidates) {
+    int v = readReg8(a, BNO_REG_CHIP_ID);
+    if (v == BNO_CHIP_ID_VAL) { bnoAddr = a; found = true; break; }
+  }
+  if (!found) return false;
   // Forzar config mode antes de cambiar registros.
-  writeReg8(BNO_ADDR, BNO_REG_OPR_MODE, 0x00);
+  writeReg8(bnoAddr, BNO_REG_OPR_MODE, 0x00);
   delay(25);
-  writeReg8(BNO_ADDR, BNO_REG_PAGE_ID, 0x00);
+  writeReg8(bnoAddr, BNO_REG_PAGE_ID, 0x00);
   // UNIT_SEL: m/s² para accel, dps para gyro, °C, ángulos en grados.
-  writeReg8(BNO_ADDR, BNO_REG_UNIT_SEL, 0x00);
+  writeReg8(bnoAddr, BNO_REG_UNIT_SEL, 0x00);
   // Pasar a modo NDOF (9-DOF fusion completo con magnetómetro).
-  writeReg8(BNO_ADDR, BNO_REG_OPR_MODE, BNO_OPR_MODE_NDOF);
+  writeReg8(bnoAddr, BNO_REG_OPR_MODE, BNO_OPR_MODE_NDOF);
   delay(25);
   return true;
 }
@@ -644,8 +660,8 @@ void setup() {
   // El banner mantiene formato 'Gyro WHO_AM_I @0xXX = 0xYY (...)' para que el
   // cliente serial.svelte.ts identifique el sensor sin cambios.
   {
-    int who = readReg8(ICM_ADDR, ICM_REG_WHO_AM_I);
-    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(ICM_ADDR, HEX);
+    int who = readReg8(icmAddr, ICM_REG_WHO_AM_I);
+    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(icmAddr, HEX);
     Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
     Serial.print(who, HEX); Serial.println(" (ICM-42688)");
   }
@@ -656,8 +672,8 @@ void setup() {
   }
 #elif SENSOR_DRIVER == MPU9250
   {
-    int who = readReg8(MPU_ADDR, MPU_REG_WHO_AM_I);
-    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(MPU_ADDR, HEX);
+    int who = readReg8(mpuAddr, MPU_REG_WHO_AM_I);
+    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(mpuAddr, HEX);
     Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
     Serial.print(who, HEX); Serial.println(" (MPU9250)");
   }
@@ -668,8 +684,8 @@ void setup() {
   }
 #elif SENSOR_DRIVER == BNO055
   {
-    int who = readReg8(BNO_ADDR, BNO_REG_CHIP_ID);
-    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(BNO_ADDR, HEX);
+    int who = readReg8(bnoAddr, BNO_REG_CHIP_ID);
+    Serial.print("Gyro WHO_AM_I @0x"); Serial.print(bnoAddr, HEX);
     Serial.print(" = 0x"); if (who < 0x10) Serial.print("0");
     Serial.print(who, HEX); Serial.println(" (BNO055)");
   }
