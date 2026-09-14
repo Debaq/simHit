@@ -4,3 +4,4 @@ package.json
 package-lock.json
 out/
 .claude/
+hardware/V1/.history/
