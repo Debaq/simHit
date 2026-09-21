@@ -410,7 +410,7 @@
   function buildProfile() {
     return {
       schema_version: 'simhit-profile-1.0',
-      generated_by: { app: 'SimHIT', version: '2026.5.0' },
+      generated_by: { app: 'SimHIT', version: '2026.9.0' },
       generated_at_utc: new Date().toISOString(),
       sensor: detectedSensor,
       firmware: firmwareInfo,
