@@ -122,9 +122,22 @@
   function applyMap(m: AxisMap): number {
     return serial.gyro[m.axis] * m.sign;
   }
-  let liveYaw = $derived(proposed ? applyMap(proposed.gyro.yaw) : 0);
-  let livePitch = $derived(proposed ? applyMap(proposed.gyro.pitch) : 0);
-  let liveRoll = $derived(proposed ? applyMap(proposed.gyro.roll) : 0);
+
+  // Muestreado a 12.5 Hz en vez de derivarse de serial.gyro: el stream llega
+  // a 200 Hz y estos tres valores se muestran con .toFixed(0), asi que
+  // derivarlos actualizaba el DOM 200 veces por segundo para un entero que
+  // cambia a ojo unas 10. Mismo patron que HeadLiveView.
+  let liveYaw = $state(0);
+  let livePitch = $state(0);
+  let liveRoll = $state(0);
+  $effect(() => {
+    const id = setInterval(() => {
+      liveYaw = proposed ? applyMap(proposed.gyro.yaw) : 0;
+      livePitch = proposed ? applyMap(proposed.gyro.pitch) : 0;
+      liveRoll = proposed ? applyMap(proposed.gyro.roll) : 0;
+    }, 80);
+    return () => clearInterval(id);
+  });
 
   async function save() {
     if (!proposed) return;
