@@ -11,6 +11,7 @@
   import { flash } from '$lib/flash.svelte';
   import { allanInPlace } from '$lib/allan-inplace.svelte';
   import { getCalPolicy } from '$lib/calibration-policy.svelte';
+  import { FIRMWARE_SAMPLE_RATE_HZ } from '$lib/firmware-constants';
   import { biasDrift } from '$lib/bias-drift.svelte';
   import { onMount } from 'svelte';
 
@@ -203,7 +204,7 @@
   let firmwareInfo = $derived({
     version: serial.firmwareVersionString ?? (serial.firmwareVersion === 'extended' ? '1.2.0' : '1.0.0'),
     git: serial.firmwareVersion,
-    sample_rate: 200,
+    sample_rate: FIRMWARE_SAMPLE_RATE_HZ,
   });
 
   // 3) Capture — config UI. Los valores se pasan al store al iniciar.
@@ -254,7 +255,7 @@
         preheatSeconds: captureCfg.preheatMin * 60,
         sensorLabel: captureCfg.sensorLabel,
         ambientTempC: captureCfg.ambientTempC,
-        sampleRateHz: 200,
+        sampleRateHz: FIRMWARE_SAMPLE_RATE_HZ,
       });
     } catch (e) {
       captureErrorMsg = String(e);

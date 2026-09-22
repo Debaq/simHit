@@ -6,6 +6,7 @@ import { acceptance } from '$lib/acceptance.svelte';
 import { settings } from '$lib/settings.svelte';
 import { evaluateImpulsePipeline } from '$lib/detectors/evaluator';
 import type { DetectorResult } from '$lib/detectors/types';
+import { FIRMWARE_SAMPLE_RATE_HZ } from './firmware-constants';
 
 /** Canal del impulso. Hasta F1 sólo se generaban LL/RL; ahora también
  *  pueden producirse impulsos verticales (LA/LP/RA/RP) cuando la cabeza
@@ -69,7 +70,9 @@ export type ImpulseTrigger = {
   artifact?: 'blink' | 'slip' | 'wrong_dir' | 'overshoot' | 'fixation_loss' | null;
 };
 
-const FS = 200;
+// El simulador corre a la misma tasa que el stream del firmware para que
+// muestra de sensor y tick del simulador queden uno a uno.
+const FS = FIRMWARE_SAMPLE_RATE_HZ;
 
 // Escala VOR para preview ocular.
 //   yaw  ±VOR_YAW_FULL°   → ±3 niveles horizontales (gaze x)

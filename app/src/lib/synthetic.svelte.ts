@@ -15,6 +15,7 @@ import { peakVelocityDetector } from './detectors/peak-velocity';
 import { durationDetector } from './detectors/duration';
 import { amplitudeDetector } from './detectors/amplitude';
 import type { Detector, DetectorContext } from './detectors/types';
+import { FIRMWARE_SAMPLE_RATE_HZ } from './firmware-constants';
 
 export type SyntheticConfig = {
   peakVelocitiesDps: number[]; // p.ej. [60, 100, 140, 180, 220, 280]
@@ -208,7 +209,7 @@ class SyntheticStore {
       durationsMs: [120, 180, 250, 320],
       noiseLevels: [0, 0.03, 0.08],
       repetitions: 30,
-      sampleRateHz: 200,
+      sampleRateHz: FIRMWARE_SAMPLE_RATE_HZ,
       side: 'RL',
       seed: 0xC0FFEE,
     };

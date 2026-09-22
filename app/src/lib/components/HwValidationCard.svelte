@@ -14,6 +14,7 @@
   // Veredicto graduado por test: usable / marginal / roto. El cliente muestra
   // números crudos junto al badge para que el usuario decida.
   import { serial, type RawSample } from '$lib/serial.svelte';
+  import { FIRMWARE_SAMPLE_DT_S } from '$lib/firmware-constants';
 
   type SensorReference = {
     label: string;
@@ -97,7 +98,7 @@
       const d = ts[i] - ts[i - 1];
       if (d > 0 && d < 1000) { acc += d; n++; }
     }
-    return n > 0 ? (acc / n) / 1000 : 1 / 200;
+    return n > 0 ? (acc / n) / 1000 : FIRMWARE_SAMPLE_DT_S;
   }
 
   function mean(arr: number[]): number {
