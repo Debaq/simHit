@@ -119,6 +119,11 @@
     // Proyecta la velocidad cefálica sobre el eje del canal activo si se
     // pasa `channel`. Para LL/RL coincide con yaw; para verticales combina
     // yaw + pitch para que el gráfico refleje el eje compuesto del canal.
+    // Scratch reutilizado entre frames para la proyeccion de canales
+    // verticales. sim.headBuf nunca se reasigna (resetBuffers usa fill), asi
+    // que el largo es estable y alcanza con alocar una vez.
+    let projBuf = new Float64Array(sim.headBuf.length);
+
     const projectedHead = (): Float64Array => {
       if (!channel || channel === 'LL' || channel === 'RL') {
         // LL/RL: ya es ±yaw. Usar headBuf directo (con signo).
@@ -126,11 +131,11 @@
       }
       const axis = CHANNEL_AXES[channel];
       const n = sim.headBuf.length;
-      const out = new Float64Array(n);
+      if (projBuf.length !== n) projBuf = new Float64Array(n);
       for (let i = 0; i < n; i++) {
-        out[i] = sim.headBuf[i] * axis.yaw + sim.headPitchBuf[i] * axis.pitch;
+        projBuf[i] = sim.headBuf[i] * axis.yaw + sim.headPitchBuf[i] * axis.pitch;
       }
-      return out;
+      return projBuf;
     };
 
     const buildData = () => (hideEye
@@ -139,8 +144,18 @@
 
     plot = new uPlot(opts, buildData(), container);
 
+    // Redibujar solo cuando el simulador publico datos nuevos. sim.rev se
+    // incrementa en cada tick y en resetBuffers; sin este gate uPlot
+    // redibujaba 1000 puntos x 3 series a 60 fps aunque nada cambiara.
+    // lastChannel fuerza un redraw cuando cambia el canal activo, porque la
+    // proyeccion depende del prop y no de sim.rev.
+    let lastRev = -1;
+    let lastChannel: Channel | null | undefined = undefined;
+
     const tick = () => {
-      if (plot && sim.connected) {
+      if (plot && sim.connected && (sim.rev !== lastRev || channel !== lastChannel)) {
+        lastRev = sim.rev;
+        lastChannel = channel;
         plot.setData(buildData(), true);
       }
       raf = requestAnimationFrame(tick);
