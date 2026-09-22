@@ -20,10 +20,37 @@ angX;angY;angZ;gyroX;gyroY;gyroZ;angAccX;angAccY;angAccZ;linAccX;linAccY;linAccZ
 |---|---|---|
 | `angX angY angZ` | ° (yaw/pitch/roll) | Fusión Madgwick |
 | `gyroX gyroY gyroZ` | °/s | L3G4200D |
-| `angAccX angAccY angAccZ` | °/s² | Derivada filtrada del gyro (SG, IIR, NONE) |
+| `angAccX angAccY angAccZ` | °/s² | Derivada filtrada del gyro (SG, IIR, NONE). **En modo SG corresponde a 2 muestras antes que el resto de la trama** — ver nota abajo |
 | `linAccX linAccY linAccZ` | m/s² | LSM303DLHC (sin compensación de gravedad) |
 | `tsMs` | ms (uint32) | `millis()` desde boot |
 | `crc` | hex | CRC-16 CCITT 0x1021, init 0xFFFF, sobre el payload previo al `;crc\n` |
+
+### Desfase de `angAcc*` en modo SG
+
+El filtro por defecto (`FILTER SG`) usa Savitzky-Golay de 5 puntos con
+coeficientes `[-2,-1,0,1,2]/(10·dt)`: es la derivada **centrada**, o sea válida
+para la muestra del medio de la ventana. Los demás campos de la trama —
+incluido `gyro*` — corresponden a la muestra **actual**.
+
+Eso deja `angAcc*` desfasado **2 muestras (10 ms a 200 Hz)** respecto del resto
+de la trama. Importa si se cruzan las dos series: por ejemplo, el pico de
+`angAcc` de un impulso aparece 10 ms antes que el instante real en la escala de
+`tsMs`.
+
+El desfase se mantiene a propósito. Las alternativas evaluadas tienen costos
+peores para vHIT:
+
+| Opción | Ruido en `angAcc` | Latencia de `gyro` |
+|---|---|---|
+| SG centrado (actual) | 1× (referencia) | 0 ms |
+| SG evaluado en el extremo | **3.53×** | 0 ms |
+| Retrasar `gyro` 2 muestras | 1× | **+10 ms en todo el stream** |
+
+`FILTER IIR` y `FILTER NONE` usan derivada hacia atrás y no tienen este
+desfase, pero sí más ruido (`NONE`) o un retardo de fase propio del IIR.
+
+Quien necesite las dos series alineadas en modo SG debe correr `angAcc*` 2
+muestras hacia adelante, o tomar `gyro*` de 2 muestras atrás.
 
 ## Salida — formato legacy
 

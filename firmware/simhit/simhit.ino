@@ -457,6 +457,13 @@ void computeAngularAccel(float gxDps, float gyDps, float gzDps, float dtSec) {
     // del buffer circular. La muestra recién insertada está en (idx-1) mod L,
     // y la más antigua en idx.
     // Coeficientes SG 5pt 1ª derivada: [-2, -1, 0, 1, 2] / (10·dt).
+    //
+    // OJO: es la derivada CENTRADA, o sea corresponde a la muestra del medio
+    // de la ventana — 2 muestras (10 ms a 200 Hz) antes que el gyro que
+    // emitIMU() manda en la misma trama. El desfase es deliberado: evaluar el
+    // SG en el extremo alinearia las series pero amplifica el ruido 3.53x, y
+    // retrasar el gyro 2 muestras agregaria 10 ms de latencia a todo el
+    // stream. Documentado en docs/SERIAL-PROTOCOL.md.
     float sx = 0, sy = 0, sz = 0;
     for (uint8_t k = 0; k < GYRO_BUF_LEN; k++) {
       // k=0 → más antigua (coef -2); k=4 → más reciente (coef +2).
