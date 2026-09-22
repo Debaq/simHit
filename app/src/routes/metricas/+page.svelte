@@ -40,12 +40,21 @@
   });
 
   // Política de re-CAL — derivada de serial.imuCal + temperatura corriente.
-  // Se re-evalúa automáticamente cuando cambian los inputs reactivos.
-  let calPolicy = $derived.by(() => {
-    // Tocar los reactivos relevantes para que Svelte sepa rebuilear:
-    void serial.imuCal; void serial.currentTempC; void serial.fwTimestamp;
-    void serial.connected;
-    return getCalPolicy();
+  //
+  // No se recalcula por reactividad: uno de sus inputs es serial.fwTimestamp,
+  // que late a 200 Hz, y getCalPolicy() devuelve un objeto nuevo con un age_s
+  // que siempre cambia. Eso re-renderizaba el bloque 200 veces por segundo
+  // para mostrar una edad en minutos y un ΔT con dos decimales.
+  //
+  // En su lugar se refresca por reloj a 1 Hz, más los eventos discretos que
+  // la cambian de golpe (conectar/desconectar, nueva CAL).
+  let calPolicy = $state(getCalPolicy());
+  $effect(() => {
+    // Recalcular de inmediato ante cambios discretos, sin esperar al tick.
+    void serial.imuCal; void serial.connected;
+    calPolicy = getCalPolicy();
+    const id = setInterval(() => { calPolicy = getCalPolicy(); }, 1000);
+    return () => clearInterval(id);
   });
 
   // Lista de puertos USB-Serial para instalación desde cero (sin firmware).
