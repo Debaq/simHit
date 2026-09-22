@@ -251,7 +251,12 @@ class Simulator {
 
   // Estado suavizado para el plot (decoupling del batching del serial USB).
   // Crudo se mantiene para detección de impulso; este valor se almacena al headBuf.
+  // Ambos ejes persisten entre ticks: el filtro es un IIR de primer orden con
+  // τ=50 ms, o sea ~10 muestras a 200 Hz, y cada tick trae solo 4-10. Si el
+  // estado se reiniciara por tick el filtro nunca convergeria y la señal
+  // quedaria atenuada hacia cero.
   private smoothedHead = 0;
+  private smoothedPitch = 0;
 
   // configuración del impulso activo
   private impCfg: {
@@ -633,9 +638,6 @@ class Simulator {
     const smoothHistory = new Array<number>(N_S);
     const smoothPitchHistory = new Array<number>(N_S);
     const eyeHistory = new Array<number>(N_S);
-    // Suavizado de pitch independiente (misma τ). Local al tick: no se
-    // persiste como campo porque sólo se necesita durante la captura.
-    let smoothedPitch = 0;
 
     for (let i = 0; i < N_S; i++) {
       const yawRaw = yawSamples[i];
@@ -643,9 +645,9 @@ class Simulator {
       // Timestamp aproximado de esta muestra (asume cadencia uniforme 1/FS)
       const sampleNow = now - (N_S - 1 - i) * SAMPLE_DT_MS;
       this.smoothedHead += (yawRaw - this.smoothedHead) * SMOOTH_ALPHA;
-      smoothedPitch += (pitchRaw - smoothedPitch) * SMOOTH_ALPHA;
+      this.smoothedPitch += (pitchRaw - this.smoothedPitch) * SMOOTH_ALPHA;
       smoothHistory[i] = this.smoothedHead;
-      smoothPitchHistory[i] = smoothedPitch;
+      smoothPitchHistory[i] = this.smoothedPitch;
 
       // Magnitud combinada para detectar inicio. Permite disparar también
       // con impulsos diagonales cuando la cabeza arranca girada ±~45°.
@@ -701,7 +703,7 @@ class Simulator {
         // combina yaw y pitch en una señal 1D que conserva el signo.
         const projected = yawRaw * axis.yaw + pitchRaw * axis.pitch;
         const smoothedProj =
-          this.smoothedHead * axis.yaw + smoothedPitch * axis.pitch;
+          this.smoothedHead * axis.yaw + this.smoothedPitch * axis.pitch;
         cfg.peak = Math.max(cfg.peak, Math.abs(projected));
         const elapsed = sampleNow - cfg.startMs;
 
