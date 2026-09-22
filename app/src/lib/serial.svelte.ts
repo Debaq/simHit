@@ -217,14 +217,25 @@ class SerialStore {
   firmwareVersionString = $state<string | null>(null);
   // MAC del ESP32 (chip-id). Reportado en el banner como "SimHit MAC AA:BB:..."
   espMacAddress = $state<string | null>(null);
-  // Cola de muestras gyro desde el último drenado por simulator. Evita
+  // Colas de muestras desde el último drenado por simulator. Evitan
   // pérdidas por bursts USB y jitter del setInterval del tick.
-  private gyroQueue: Array<{ x: number; y: number; z: number }> = [];
-  // Cola de aceleracion angular alineada muestra a muestra con gyroQueue.
+  //
+  // Se guardan como arrays numéricos paralelos (no como {x,y,z}) porque a
+  // 200 Hz un objeto por eje y por cola eran 3 allocs por muestra — 600
+  // objetos/s de basura para el GC. Los tres arrays de cada cola comparten
+  // índice: qGyroX[i], qGyroY[i] y qGyroZ[i] son la misma muestra.
+  private qGyroX: number[] = [];
+  private qGyroY: number[] = [];
+  private qGyroZ: number[] = [];
+  // Aceleracion angular alineada muestra a muestra con la cola de gyro.
   // Cuando llega firmware legacy, los valores son 0 (no usados).
-  private angAccelQueue: Array<{ x: number; y: number; z: number }> = [];
-  // Cola de aceleracion lineal alineada con las anteriores.
-  private linAccelQueue: Array<{ x: number; y: number; z: number }> = [];
+  private qAngAccX: number[] = [];
+  private qAngAccY: number[] = [];
+  private qAngAccZ: number[] = [];
+  // Aceleracion lineal alineada con las anteriores.
+  private qLinAccX: number[] = [];
+  private qLinAccY: number[] = [];
+  private qLinAccZ: number[] = [];
   // Rate-limit de warnings por linea malformada (1/seg).
   private lastBadLineWarnMs = 0;
   // Sumideros de captura raw: callbacks que reciben cada muestra completa
@@ -712,15 +723,19 @@ class SerialStore {
     tempC: number,
     ts: number,
   ) {
-    this.angle = { x: ax, y: ay, z: az };
-    this.gyro  = { x: gx, y: gy, z: gz };
+    // Mutacion in-place: `angle`/`gyro` son proxies $state, asi que escribir
+    // los campos propaga reactividad igual que reasignar el objeto, pero sin
+    // alocar dos objetos nuevos por muestra (400/s a 200 Hz) y con
+    // invalidacion granular por campo.
+    this.angle.x = ax; this.angle.y = ay; this.angle.z = az;
+    this.gyro.x  = gx; this.gyro.y  = gy; this.gyro.z  = gz;
     this.angularAccelX = aax; this.angularAccelY = aay; this.angularAccelZ = aaz;
     this.linearAccelX  = lax; this.linearAccelY  = lay; this.linearAccelZ  = laz;
     this.fwTimestamp = ts;
     if (Number.isFinite(tempC)) this.currentTempC = tempC;
-    this.gyroQueue.push({ x: gx, y: gy, z: gz });
-    this.angAccelQueue.push({ x: aax, y: aay, z: aaz });
-    this.linAccelQueue.push({ x: lax, y: lay, z: laz });
+    this.qGyroX.push(gx); this.qGyroY.push(gy); this.qGyroZ.push(gz);
+    this.qAngAccX.push(aax); this.qAngAccY.push(aay); this.qAngAccZ.push(aaz);
+    this.qLinAccX.push(lax); this.qLinAccY.push(lay); this.qLinAccZ.push(laz);
     // Notificar a sumideros de captura. Wrapping en try para que una captura
     // que falle no rompa el stream principal del simulador.
     if (this.captureSinks.length > 0) {
@@ -732,11 +747,11 @@ class SerialStore {
     // Cap defensivo: si nadie drena (sim parado), no crecer sin límite.
     // Las tres colas se mantienen alineadas: si truncamos una, truncamos
     // las tres por el mismo lado.
-    if (this.gyroQueue.length > 256) {
-      const excess = this.gyroQueue.length - 256;
-      this.gyroQueue.splice(0, excess);
-      this.angAccelQueue.splice(0, excess);
-      this.linAccelQueue.splice(0, excess);
+    if (this.qGyroX.length > 256) {
+      const excess = this.qGyroX.length - 256;
+      this.qGyroX.splice(0, excess); this.qGyroY.splice(0, excess); this.qGyroZ.splice(0, excess);
+      this.qAngAccX.splice(0, excess); this.qAngAccY.splice(0, excess); this.qAngAccZ.splice(0, excess);
+      this.qLinAccX.splice(0, excess); this.qLinAccY.splice(0, excess); this.qLinAccZ.splice(0, excess);
     }
   }
 
@@ -745,16 +760,29 @@ class SerialStore {
   // drainGyroYaw/Pitch entre ticks, el simulator consume ambos canales en
   // un mismo drenaje para garantizar el alineamiento.
   drainGyro(): { yaw: number[]; pitch: number[] } {
-    const my = this.axes.gyro.yaw;
-    const mp = this.axes.gyro.pitch;
-    const yaw = this.gyroQueue.map((s) => s[my.axis] * my.sign);
-    const pitch = this.gyroQueue.map((s) => s[mp.axis] * mp.sign);
-    this.gyroQueue.length = 0;
+    const yaw = this.projectQueue(this.qGyroX, this.qGyroY, this.qGyroZ, this.axes.gyro.yaw);
+    const pitch = this.projectQueue(this.qGyroX, this.qGyroY, this.qGyroZ, this.axes.gyro.pitch);
     // Mantener angAccel/linAccel alineadas con gyro: drainGyro las descarta.
     // Quien quiera consumir la accel angular debe usar drainAll().
-    this.angAccelQueue.length = 0;
-    this.linAccelQueue.length = 0;
+    this.clearQueues();
     return { yaw, pitch };
+  }
+
+  // Proyecta una cola de 3 arrays paralelos sobre un eje mapeado. Reemplaza
+  // al viejo queue.map((s) => s[axis] * sign) sin materializar objetos.
+  private projectQueue(qx: number[], qy: number[], qz: number[], m: AxisMap): number[] {
+    const src = m.axis === 'x' ? qx : m.axis === 'y' ? qy : qz;
+    const n = src.length;
+    const out = new Array<number>(n);
+    const sign = m.sign;
+    for (let i = 0; i < n; i++) out[i] = src[i] * sign;
+    return out;
+  }
+
+  private clearQueues() {
+    this.qGyroX.length = 0; this.qGyroY.length = 0; this.qGyroZ.length = 0;
+    this.qAngAccX.length = 0; this.qAngAccY.length = 0; this.qAngAccZ.length = 0;
+    this.qLinAccX.length = 0; this.qLinAccY.length = 0; this.qLinAccZ.length = 0;
   }
 
   // Drena gyro + aceleracion angular + aceleracion lineal en paralelo. Las
@@ -764,44 +792,38 @@ class SerialStore {
   drainAll(): {
     yaw: number[]; pitch: number[];
     angAccelYaw: number[]; angAccelPitch: number[];
-    linAccel: Array<{ x: number; y: number; z: number }>;
   } {
     const my = this.axes.gyro.yaw;
     const mp = this.axes.gyro.pitch;
-    const yaw = this.gyroQueue.map((s) => s[my.axis] * my.sign);
-    const pitch = this.gyroQueue.map((s) => s[mp.axis] * mp.sign);
-    const angAccelYaw   = this.angAccelQueue.map((s) => s[my.axis] * my.sign);
-    const angAccelPitch = this.angAccelQueue.map((s) => s[mp.axis] * mp.sign);
-    const linAccel = this.linAccelQueue.map((s) => ({ x: s.x, y: s.y, z: s.z }));
-    this.gyroQueue.length = 0;
-    this.angAccelQueue.length = 0;
-    this.linAccelQueue.length = 0;
-    return { yaw, pitch, angAccelYaw, angAccelPitch, linAccel };
+    const yaw = this.projectQueue(this.qGyroX, this.qGyroY, this.qGyroZ, my);
+    const pitch = this.projectQueue(this.qGyroX, this.qGyroY, this.qGyroZ, mp);
+    const angAccelYaw   = this.projectQueue(this.qAngAccX, this.qAngAccY, this.qAngAccZ, my);
+    const angAccelPitch = this.projectQueue(this.qAngAccX, this.qAngAccY, this.qAngAccZ, mp);
+    this.clearQueues();
+    return { yaw, pitch, angAccelYaw, angAccelPitch };
   }
 
   // Drains individuales de aceleracion angular (mismos ejes que el gyro).
   // No usar junto con drainGyro/drainAll en el mismo tick: cada drain vacia.
-  drainGyroAccelX(): number[] {
-    const out = this.angAccelQueue.map((s) => s.x);
-    this.angAccelQueue.length = 0;
-    return out;
-  }
-  drainGyroAccelY(): number[] {
-    const out = this.angAccelQueue.map((s) => s.y);
-    this.angAccelQueue.length = 0;
-    return out;
-  }
-  drainGyroAccelZ(): number[] {
-    const out = this.angAccelQueue.map((s) => s.z);
-    this.angAccelQueue.length = 0;
+  drainGyroAccelX(): number[] { return this.drainAngAccAxis(this.qAngAccX); }
+  drainGyroAccelY(): number[] { return this.drainAngAccAxis(this.qAngAccY); }
+  drainGyroAccelZ(): number[] { return this.drainAngAccAxis(this.qAngAccZ); }
+
+  private drainAngAccAxis(src: number[]): number[] {
+    const out = src.slice();
+    this.qAngAccX.length = 0; this.qAngAccY.length = 0; this.qAngAccZ.length = 0;
     return out;
   }
 
   // Drena la aceleracion lineal cruda (sin mapear por axes; es un vector
   // fisico del cuerpo, no orientacion).
   drainLinearAccel(): Array<{ x: number; y: number; z: number }> {
-    const out = this.linAccelQueue.map((s) => ({ x: s.x, y: s.y, z: s.z }));
-    this.linAccelQueue.length = 0;
+    const n = this.qLinAccX.length;
+    const out = new Array<{ x: number; y: number; z: number }>(n);
+    for (let i = 0; i < n; i++) {
+      out[i] = { x: this.qLinAccX[i], y: this.qLinAccY[i], z: this.qLinAccZ[i] };
+    }
+    this.qLinAccX.length = 0; this.qLinAccY.length = 0; this.qLinAccZ.length = 0;
     return out;
   }
 
@@ -927,9 +949,8 @@ class SerialStore {
   // Conservado para compatibilidad con llamadores que no consumen pitch.
   // Vacía la cola, igual que drainGyro.
   drainGyroYaw(): number[] {
-    const m = this.axes.gyro.yaw;
-    const out = this.gyroQueue.map((s) => s[m.axis] * m.sign);
-    this.gyroQueue.length = 0;
+    const out = this.projectQueue(this.qGyroX, this.qGyroY, this.qGyroZ, this.axes.gyro.yaw);
+    this.clearQueues();
     return out;
   }
 
@@ -937,9 +958,8 @@ class SerialStore {
   // No usar junto con drainGyroYaw en el mismo tick: cada drain vacía la
   // cola. Para consumo combinado usar drainGyro().
   drainGyroPitch(): number[] {
-    const m = this.axes.gyro.pitch;
-    const out = this.gyroQueue.map((s) => s[m.axis] * m.sign);
-    this.gyroQueue.length = 0;
+    const out = this.projectQueue(this.qGyroX, this.qGyroY, this.qGyroZ, this.axes.gyro.pitch);
+    this.clearQueues();
     return out;
   }
 }
