@@ -146,10 +146,14 @@ const CSV_HEADER: &str = "timestamp_us,gyro_x_dps,gyro_y_dps,gyro_z_dps,accel_x_
 
 // ──────────────────── Helpers ────────────────────
 
-fn fmt_opt(v: Option<f64>) -> String {
+// Escribe un opcional directamente sobre el buffer de linea. Antes devolvia
+// un String: eran cuatro allocs por muestra (mag x/y/z + temp), ~800 Strings
+// por segundo a 200 Hz, solo para tirarlos al final de la iteracion.
+fn write_opt(out: &mut String, v: Option<f64>) {
+    use std::fmt::Write as _;
     match v {
-        Some(x) if x.is_finite() => format!("{:.6}", x),
-        _ => "NaN".to_string(),
+        Some(x) if x.is_finite() => { let _ = write!(out, "{:.6}", x); }
+        _ => out.push_str("NaN"),
     }
 }
 
@@ -253,13 +257,19 @@ fn append_samples_inner(session_id: &str, samples: &[Sample]) -> Result<(u64, Op
         use std::fmt::Write as _;
         let _ = write!(
             line,
-            "{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{},{},{},{}\n",
+            "{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},",
             sm.timestamp_us,
             sm.gyro_x_dps, sm.gyro_y_dps, sm.gyro_z_dps,
             sm.accel_x_g, sm.accel_y_g, sm.accel_z_g,
-            fmt_opt(sm.mag_x_ut), fmt_opt(sm.mag_y_ut), fmt_opt(sm.mag_z_ut),
-            fmt_opt(sm.temp_c),
         );
+        write_opt(&mut line, sm.mag_x_ut);
+        line.push(',');
+        write_opt(&mut line, sm.mag_y_ut);
+        line.push(',');
+        write_opt(&mut line, sm.mag_z_ut);
+        line.push(',');
+        write_opt(&mut line, sm.temp_c);
+        line.push('\n');
         write_line(s, &line)?;
         s.samples_written += 1;
     }
