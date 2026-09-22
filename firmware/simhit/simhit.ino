@@ -109,7 +109,7 @@
 #define I2C_SDA_PIN 6
 #define I2C_SCL_PIN 7
 
-// Laser: GPIO3 (active-high). Driver simple: pin → resistencia → módulo laser → GND.
+// Laser: GPIO5 (active-high). Driver simple: pin → resistencia → módulo laser → GND.
 #define LASER_PIN 5
 
 // Tasa de muestreo / fusión
@@ -2289,8 +2289,11 @@ void calibrateMag() {
       break;
     }
 
-    while (millis() - lastTick < MAG_CAL_PERIOD_MS) { /* spin */ }
+    // Esperar al proximo tick cediendo la CPU en vez de hacer busy-wait:
+    // eran hasta 20 ms de spin por iteracion durante 15-45 s.
     lastTick += MAG_CAL_PERIOD_MS;
+    int32_t remaining = (int32_t)(lastTick - millis());
+    if (remaining > 0) delay((uint32_t)remaining);
   }
 
   if (aborted) {
