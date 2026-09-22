@@ -51,7 +51,7 @@
 // Versión del firmware. Sincronizar con firmware/manifest.json cada vez que se
 // haga un release. El cliente la usa para chequear actualizaciones contra el
 // manifest del repo.
-#define FW_VERSION_STRING "1.4.0"
+#define FW_VERSION_STRING "1.4.1"
 
 // ──────────────────── Selección del driver de sensor ────────────────────
 // La CI pasa -DSENSOR_DRIVER=<MACRO> al compilador para producir un .bin por
