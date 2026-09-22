@@ -9,15 +9,31 @@ const STORAGE_KEY = 'simhit:sensorAxes';
 // banner de boot ademas de la respuesta directa a HELLO.
 const PROBE_TIMEOUT_MS = 2000;
 
+// Decoder compartido: onData corre por cada chunk del stream de 200 Hz y
+// construir un TextDecoder nuevo ahi es puro overhead.
+const DECODER = new TextDecoder();
+
+// Tabla del CRC-16 CCITT (poly 0x1021). Precomputarla cambia el calculo de
+// 8 iteraciones por caracter a una sola: a 200 Hz con tramas de ~100 chars
+// eran ~160k iteraciones por segundo solo para validar el stream.
+const CRC16_TABLE = (() => {
+  const t = new Uint16Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i << 8;
+    for (let b = 0; b < 8; b++) {
+      c = (c & 0x8000) ? (((c << 1) ^ 0x1021) & 0xffff) : ((c << 1) & 0xffff);
+    }
+    t[i] = c;
+  }
+  return t;
+})();
+
 // CRC-16 CCITT (poly 0x1021, init 0xFFFF, sin reflexion). Replica el calculo
 // del firmware. Aplicado sobre el payload (todo lo previo al ;CRC final).
 function crc16Ccitt(s: string): number {
   let crc = 0xffff;
   for (let i = 0; i < s.length; i++) {
-    crc ^= (s.charCodeAt(i) & 0xff) << 8;
-    for (let b = 0; b < 8; b++) {
-      crc = (crc & 0x8000) ? (((crc << 1) ^ 0x1021) & 0xffff) : ((crc << 1) & 0xffff);
-    }
+    crc = ((crc << 8) ^ CRC16_TABLE[((crc >> 8) ^ (s.charCodeAt(i) & 0xff)) & 0xff]) & 0xffff;
   }
   return crc & 0xffff;
 }
@@ -347,7 +363,7 @@ class SerialStore {
       }
     };
     const onData = (data: Uint8Array | string) => {
-      const chunk = typeof data === 'string' ? data : new TextDecoder().decode(data);
+      const chunk = typeof data === 'string' ? data : DECODER.decode(data);
       buffer += chunk;
       let nl;
       while ((nl = buffer.indexOf('\n')) >= 0) {
@@ -516,7 +532,7 @@ class SerialStore {
   private onData(data: Uint8Array | string) {
     let chunk = '';
     if (typeof data === 'string') chunk = data;
-    else chunk = new TextDecoder().decode(data);
+    else chunk = DECODER.decode(data);
     this.buffer += chunk;
     let nl;
     while ((nl = this.buffer.indexOf('\n')) >= 0) {
@@ -657,7 +673,9 @@ class SerialStore {
     if (parts.length === 18) {
       // Formato v1.1: 12 floats originales + magX/Y/Z + tempC + tsMs + CRC.
       const crcStr = parts[17];
-      const payload = parts.slice(0, 17).join(';');
+      // El payload es la linea entera menos el ";CRC" final: reconstruirlo
+      // con slice+join creaba un array y un string por muestra.
+      const payload = line.slice(0, line.lastIndexOf(';'));
       const crcExpected = crc16Ccitt(payload);
       const crcReceived = parseInt(crcStr, 16);
       if (!Number.isFinite(crcReceived) || crcReceived !== crcExpected) {
@@ -684,7 +702,7 @@ class SerialStore {
     if (parts.length === 14) {
       // Validar CRC: payload son los primeros 13 campos unidos por ';'.
       const crcStr = parts[13];
-      const payload = parts.slice(0, 13).join(';');
+      const payload = line.slice(0, line.lastIndexOf(';'));
       const crcExpected = crc16Ccitt(payload);
       const crcReceived = parseInt(crcStr, 16);
       if (!Number.isFinite(crcReceived) || crcReceived !== crcExpected) {
