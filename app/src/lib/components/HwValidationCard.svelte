@@ -13,7 +13,7 @@
   //
   // Veredicto graduado por test: usable / marginal / roto. El cliente muestra
   // números crudos junto al badge para que el usuario decida.
-  import { serial } from '$lib/serial.svelte';
+  import { serial, type RawSample } from '$lib/serial.svelte';
 
   type SensorReference = {
     label: string;
@@ -45,39 +45,59 @@
   let progressLabel = $state('');
   let progressPct = $state(0);
 
-  // Muestreo: el stream del firmware llega a 200 Hz; capturamos por wall-clock.
-  // Cada 16 ms tomamos un sample del último valor leído por serial. Esto
-  // submuestrea ligeramente (200→62 Hz efectivo) pero es suficiente para
-  // estadística estática; evita acoplarnos al tick exacto del firmware.
-  const TICK_MS = 16;
+  // Muestreo: nos colgamos del sumidero de captura del serial, que entrega
+  // cada muestra tal como la emite el firmware (200 Hz, sin mapeo de ejes).
+  //
+  // Antes esto hacia polling del ultimo valor de serial.gyro cada 16 ms, lo
+  // que descartaba dos de cada tres muestras y las tomaba a intervalos
+  // irregulares (jitter del setInterval). Para lo que mide esta tarjeta —
+  // SD del ruido del giroscopio — el submuestreo irregular sesga el
+  // resultado, que es justamente el numero contra el que se decide si el
+  // sensor sirve. El modulo de metricas ya usaba los sumideros; esta tarjeta
+  // no.
+  const TICK_MS = 16;  // solo refresco de la barra de progreso
 
-  type GyroSamples = { x: number[]; y: number[]; z: number[] };
+  type GyroSamples = { x: number[]; y: number[]; z: number[]; ts: number[] };
   type AccelSamples = { mag: number[] };
 
-  function pushGyro(g: GyroSamples) {
-    g.x.push(serial.gyro.x);
-    g.y.push(serial.gyro.y);
-    g.z.push(serial.gyro.z);
+  function pushGyro(g: GyroSamples, s: RawSample) {
+    g.x.push(s.gx);
+    g.y.push(s.gy);
+    g.z.push(s.gz);
+    g.ts.push(s.tsMs);
   }
-  function pushAccel(a: AccelSamples) {
-    const lx = serial.linearAccelX, ly = serial.linearAccelY, lz = serial.linearAccelZ;
-    a.mag.push(Math.sqrt(lx*lx + ly*ly + lz*lz));
+  function pushAccel(a: AccelSamples, s: RawSample) {
+    a.mag.push(Math.sqrt(s.lax * s.lax + s.lay * s.lay + s.laz * s.laz));
   }
 
-  async function captureFor(ms: number, onSample: () => void): Promise<void> {
+  // Captura durante `ms` recibiendo cada muestra del firmware. El progreso se
+  // refresca aparte para no repintar la barra 200 veces por segundo.
+  async function captureFor(ms: number, onSample: (s: RawSample) => void): Promise<void> {
     progressPct = 0;
     const start = performance.now();
     return new Promise((resolve) => {
+      const unsubscribe = serial.addCaptureSink(onSample);
       const id = setInterval(() => {
-        onSample();
         const elapsed = performance.now() - start;
         progressPct = Math.min(1, elapsed / ms);
         if (elapsed >= ms) {
           clearInterval(id);
+          unsubscribe();
           resolve();
         }
       }, TICK_MS);
     });
+  }
+
+  // Periodo medio real entre muestras (s), derivado de los timestamps del
+  // firmware. Cae a 1/200 si la serie es demasiado corta o no monotona.
+  function meanDtSec(ts: number[]): number {
+    let acc = 0, n = 0;
+    for (let i = 1; i < ts.length; i++) {
+      const d = ts[i] - ts[i - 1];
+      if (d > 0 && d < 1000) { acc += d; n++; }
+    }
+    return n > 0 ? (acc / n) / 1000 : 1 / 200;
   }
 
   function mean(arr: number[]): number {
@@ -139,7 +159,7 @@
       // Test 1: gravedad (1 s)
       progressLabel = 'Test 1/3: Gravedad estática (1 s)';
       const acc: AccelSamples = { mag: [] };
-      await captureFor(1000, () => pushAccel(acc));
+      await captureFor(1000, (sm) => pushAccel(acc, sm));
       const gMean = mean(acc.mag);
       gravity = { verdict: evalGravity(gMean), detail: `‖a‖ = ${gMean.toFixed(2)} m/s²` };
 
@@ -147,8 +167,8 @@
       progressLabel = 'Test 2-3: Noise floor + bias estático (10 s)';
       noise = { verdict: 'running', detail: '' };
       bias = { verdict: 'running', detail: '' };
-      const gy: GyroSamples = { x: [], y: [], z: [] };
-      await captureFor(10000, () => pushGyro(gy));
+      const gy: GyroSamples = { x: [], y: [], z: [], ts: [] };
+      await captureFor(10000, (sm) => pushGyro(gy, sm));
 
       // Noise floor: SD del gyro (°/s) → ARW (°/√h) ≈ SD × √(T_sample_s / 3600).
       // Estimamos T_sample como duración total / N. Más conservador: usar SD
@@ -157,7 +177,9 @@
       // Simplificación: usamos SD × √(t/3600) con t = 1/200.
       const sdGyroX = stddev(gy.x), sdGyroY = stddev(gy.y), sdGyroZ = stddev(gy.z);
       const sdMean = (sdGyroX + sdGyroY + sdGyroZ) / 3;
-      const dtSec = 1 / 200;
+      // Periodo real medido, no el ODR nominal: si el firmware corre a otra
+      // tasa o se perdieron muestras, el ARW sale mal escalado.
+      const dtSec = meanDtSec(gy.ts);
       const arwMeas = sdMean * Math.sqrt(dtSec / 3600) * 3600;  // °/h equiv
       // Conversión limpia: ARW (°/√h) = SD (°/s) × √(dt_s)/√(1/3600)
       //                  = SD × √(dt_s × 3600). Para SD=0.1 °/s, dt=1/200 →
@@ -192,20 +214,35 @@
     cross = { verdict: 'running', detail: '' };
     crossCapturing = true;
     const start = performance.now();
-    let lastT = start;
     const intX = { v: 0 }, intY = { v: 0 }, intZ = { v: 0 };
     const DURATION_MS = 4000;  // 90° en 4 s = 22.5°/s. Tiempo suficiente.
+
+    // Integramos muestra a muestra con el dt de los timestamps del firmware,
+    // no con el reloj del host. El resto del modulo ya sigue ese criterio
+    // (ver calibration-policy.svelte.ts): el wall-clock del host sufre el
+    // jitter del setInterval y el batching del USB, que es exactamente el
+    // error que se acumula al integrar.
+    let lastTs: number | null = null;
     await new Promise<void>((resolve) => {
+      const unsubscribe = serial.addCaptureSink((sm) => {
+        if (lastTs !== null) {
+          const dMs = sm.tsMs - lastTs;
+          // Descartar repetidos, retrocesos y saltos largos (reconexion).
+          if (dMs > 0 && dMs < 1000) {
+            const dt = dMs / 1000;
+            intX.v += sm.gx * dt;
+            intY.v += sm.gy * dt;
+            intZ.v += sm.gz * dt;
+          }
+        }
+        lastTs = sm.tsMs;
+      });
       const id = setInterval(() => {
-        const now = performance.now();
-        const dt = (now - lastT) / 1000;
-        lastT = now;
-        intX.v += serial.gyro.x * dt;
-        intY.v += serial.gyro.y * dt;
-        intZ.v += serial.gyro.z * dt;
-        crossProgress = Math.min(1, (now - start) / DURATION_MS);
-        if (now - start >= DURATION_MS) {
+        const elapsed = performance.now() - start;
+        crossProgress = Math.min(1, elapsed / DURATION_MS);
+        if (elapsed >= DURATION_MS) {
           clearInterval(id);
+          unsubscribe();
           resolve();
         }
       }, 16);
