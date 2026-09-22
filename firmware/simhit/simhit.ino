@@ -352,6 +352,14 @@ float prevAngleX = 0.0f, prevAngleY = 0.0f, prevAngleZ = 0.0f;
 float offsetX = 0.0f, offsetY = 0.0f, offsetZ = 0.0f;
 
 uint32_t lastSampleUs = 0;
+// Atraso maximo que el loop intenta recuperar tick a tick. Por encima de esto
+// se re-engancha la fase al reloj en vez de emitir la deuda en rafaga. Tres
+// periodos tolera el jitter normal del scheduler y del I2C; una pausa por
+// calibracion (>= 1 s) queda muy por encima.
+static const uint32_t RESYNC_THRESHOLD_US = 3 * SAMPLE_PERIOD_US;
+// Cuantas veces se re-engancho la fase. Se reporta en IMU STATUS para poder
+// diagnosticar bloqueos del loop desde el cliente.
+uint32_t samplesSkipped = 0;
 
 // --- Aceleración angular calculada en hardware ---
 //
@@ -1390,8 +1398,30 @@ void setup() {
 
 void loop() {
   uint32_t now = micros();
-  if ((int32_t)(now - lastSampleUs) >= (int32_t)SAMPLE_PERIOD_US) {
+  int32_t behind = (int32_t)(now - lastSampleUs);
+  if (behind >= (int32_t)SAMPLE_PERIOD_US) {
+    // Acumulador de fase: avanzar un periodo evita drift acumulado frente a
+    // hacer lastSampleUs = now.
     lastSampleUs += SAMPLE_PERIOD_US;
+    // Pero si quedamos atrasados mas de RESYNC_THRESHOLD_US, no intentamos
+    // recuperar los ticks perdidos: re-enganchamos la fase al reloj actual.
+    //
+    // Sin esto, cualquier bloqueo largo del loop (IMU CAL bloquea 1 s, MAG CAL
+    // hasta 45 s) dejaba una deuda de cientos o miles de periodos que el loop
+    // "pagaba" llamando a sampleAndFuse() en rafaga, lo mas rapido que diera
+    // el I2C. Esa rafaga metia muestras duplicadas en el stream (el sensor no
+    // genero una muestra nueva por cada tick), alimentaba la derivada con
+    // dt = 1/SAMPLE_RATE_HZ cuando en tiempo real habia transcurrido ~0, y
+    // avanzaba el filtro de fusion el equivalente a toda la pausa en unos
+    // milisegundos. Con start_imu activo ademas emitia miles de tramas con
+    // millis() casi identico, que el cliente contabiliza como gaps.
+    //
+    // Perder los ticks de una pausa es correcto: durante la pausa no hubo
+    // muestras reales que emitir.
+    if (behind > (int32_t)RESYNC_THRESHOLD_US) {
+      lastSampleUs = now;
+      samplesSkipped++;
+    }
     sampleAndFuse();
     if (start_imu) emitIMU();
   }
@@ -1984,7 +2014,12 @@ void printImuStatus() {
   Serial.print(pitch_off, 2); Serial.print(",");
   Serial.print(roll_off, 2);
   Serial.print(" emit=");
-  Serial.println(start_imu ? "ON" : "OFF");
+  Serial.print(start_imu ? "ON" : "OFF");
+  // Veces que el loop se atraso lo suficiente como para re-enganchar la fase
+  // en vez de recuperar los ticks. Distinto de cero tras una calibracion es
+  // normal (la rutina bloquea); creciendo solo, indica que algo mas bloquea.
+  Serial.print(" resync=");
+  Serial.println((unsigned long)samplesSkipped);
 
   // Reporte JSON de la CAL persistida — fuente de verdad para sensor_profile.json.
   if (calibrated) {
