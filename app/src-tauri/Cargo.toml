@@ -1,6 +1,6 @@
 [package]
 name = "simhit"
-version = "2026.9.0"
+version = "2026.9.1"
 description = "SimHIT — simulador vHIT para entrenamiento"
 authors = ["Debaq"]
 edition = "2021"
