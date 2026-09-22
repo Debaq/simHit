@@ -86,10 +86,10 @@
     }
   ],
   "latest": {
-    "version": "1.4.0",
+    "version": "1.4.1",
     "channel": "stable",
-    "released_at": "2026-05-14",
-    "notes": "v1.4.0: mapeo de ejes (AxesConfig) persistido en NVS + comandos AXES GET/SET/RESET. Habilita el wizard de ejes en /metricas paso 2 y la portabilidad del setup entre PCs. Sumado en cliente: tarjeta de validación funcional de hardware (gravedad, noise floor, bias estático, cross-axis) con veredicto usable/marginal/roto.",
+    "released_at": "2026-09-22",
+    "notes": "v1.4.1: release de correcciones, sin cambios de protocolo. El loop ya no recupera en rafaga los ticks perdidos durante IMU CAL (1 s) o MAG CAL (hasta 45 s), que metia muestras duplicadas y tramas con timestamps casi identicos. Timeout de lectura de comandos acotado a 20 ms (era 1000 ms por defecto). Un fallo de init del sensor ya no deja el equipo mudo: repite el diagnostico y sigue respondiendo HELLO/VERSION/SENSOR/RESET. AXES SET exige que el mapeo sea una permutacion de x/y/z. IMU STATUS agrega el contador \"resync=\".",
     "min_compatible_app": "2026.5.0",
     "artifacts": [
       {
@@ -97,56 +97,56 @@
         "sensor": "l3g-lsm303",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.0/simhit-fw-1.4.0-esp32c3-l3g-lsm303.merged.bin",
-        "sha256": "72da1c2a9a6648730204d453599b453ef55038cb95d790899272647a87eb61aa"
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.1/simhit-fw-1.4.1-esp32c3-l3g-lsm303.merged.bin",
+        "sha256": "5561b93527ee736464a002e65a75d8d00045613fa9090d7e3b6632a9360b1e9b"
       },
       {
         "board": "esp32-c3-supermini",
         "sensor": "icm-42688",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.0/simhit-fw-1.4.0-esp32c3-icm-42688.merged.bin",
-        "sha256": "6895f801f68847ac42f6ec0d7f6311ae8318133ca9712373bbffee840cf9b916"
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.1/simhit-fw-1.4.1-esp32c3-icm-42688.merged.bin",
+        "sha256": "9ce07a1f03b5b16cba7c27675539a6d30033addebd1a1dd6e9aad9ce3398139a"
       },
       {
         "board": "esp32-c3-supermini",
         "sensor": "mpu9250",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.0/simhit-fw-1.4.0-esp32c3-mpu9250.merged.bin",
-        "sha256": "b648062f66386db8bf5ed36d0a9b330374c884d422f5140de18bb69f2573ed73"
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.1/simhit-fw-1.4.1-esp32c3-mpu9250.merged.bin",
+        "sha256": "402701183c6d601e6cdbd07a8dd73b979526b506965138c5101ddce25b8556bc"
       },
       {
         "board": "esp32-c3-supermini",
         "sensor": "bno055",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.0/simhit-fw-1.4.0-esp32c3-bno055.merged.bin",
-        "sha256": "1aeb7685738307f3e2450620fa01eeadf58d5393e1704d48013b1e594ec9ed05"
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.1/simhit-fw-1.4.1-esp32c3-bno055.merged.bin",
+        "sha256": "c2bf2b1b74fe6403ef4487948675ed1bf188fe76e2edcce28fbbee125dd4c3aa"
       },
       {
         "board": "esp32-c3-supermini",
         "sensor": "mpu6050",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.0/simhit-fw-1.4.0-esp32c3-mpu6050.merged.bin",
-        "sha256": "b752781e27df50c68077304c13b15c78927d653971394ffca70132daa9afd5f8"
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.1/simhit-fw-1.4.1-esp32c3-mpu6050.merged.bin",
+        "sha256": "97928eb2edb2cef6c995918c91b0abd81135c2fe4e9f387e624abcb1b13d59eb"
       },
       {
         "board": "esp32-c3-supermini",
         "sensor": "itg-adxl-hmc",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.0/simhit-fw-1.4.0-esp32c3-itg-adxl-hmc.merged.bin",
-        "sha256": "c32d46c60606e5c7ea40f00891b93a6b9c18aa04e38947f7e98dd82cc4abb575"
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.1/simhit-fw-1.4.1-esp32c3-itg-adxl-hmc.merged.bin",
+        "sha256": "0be9ec76404c6a7312bb630e2c520cf0afc428aa2ff6b39058058f23fdaf78ce"
       },
       {
         "board": "esp32-c3-supermini",
         "sensor": "icm-20948",
         "image_type": "merged",
         "flash_address": 0,
-        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.0/simhit-fw-1.4.0-esp32c3-icm-20948.merged.bin",
-        "sha256": "7177a21d36b61af7e077e4a3da768827392d15a1992bc7442c0b788404df2179"
+        "url": "https://github.com/Debaq/simHit/releases/download/fw-v1.4.1/simhit-fw-1.4.1-esp32c3-icm-20948.merged.bin",
+        "sha256": "44ee64524217d76e352a1144ad4fea4b6c8566ae30bd14d55cf3d79b0da7e9e0"
       }
     ]
   },
