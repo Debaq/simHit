@@ -368,11 +368,6 @@
     color: var(--text-muted); font-weight: 600;
     margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
   }
-  .grp-title .soon {
-    background: var(--surface-2); color: var(--text-muted);
-    font-size: 9px; padding: 2px 6px; border-radius: 999px;
-    text-transform: none; letter-spacing: 0; font-weight: 500;
-  }
   .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 
   .ch-card {

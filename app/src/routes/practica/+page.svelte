@@ -159,6 +159,15 @@
   });
 
   let nameModalOpen = $state(false);
+  // Foco en el campo de nombre al abrir el modal. Se hace por efecto y no con
+  // el atributo autofocus: ese atributo es estatico, corre una sola vez al
+  // montar y a11y lo desaconseja porque mueve el foco sin que el usuario lo
+  // pida. Aca el modal si es un contexto donde corresponde, y ademas asi el
+  // foco vuelve al campo cada vez que se reabre, no solo la primera.
+  let practitionerEl = $state<HTMLInputElement | null>(null);
+  $effect(() => {
+    if (nameModalOpen) practitionerEl?.focus();
+  });
   let practitionerInput = $state('');
   function startSession() {
     if (!bundle || bundle.kind === 'clinico') return;
@@ -601,8 +610,8 @@
         type="text"
         bind:value={practitionerInput}
         placeholder="Ej. Juan Pérez"
-        autofocus
         maxlength="80"
+        bind:this={practitionerEl}
       />
       <p class="name-hint">Aparecerá en el informe PDF y en los resultados.</p>
       <div class="name-actions">

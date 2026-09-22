@@ -1624,9 +1624,6 @@
     border-bottom: 1px solid var(--border);
   }
   .tbl th { color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
-  .tbl tr.hit { background: var(--primary-soft); }
-  .tbl tr.hit td { color: var(--primary); font-weight: 600; }
-  .tbl code { font-size: 11px; }
 
   /* Form */
   .form { display: flex; flex-direction: column; gap: 10px; }
@@ -1859,10 +1856,6 @@
   .tag code { background: transparent; padding: 0; }
   .tag.tag-on { background: rgba(22,163,74,.12); color: var(--success); border-color: rgba(22,163,74,.3); }
   .tag.tag-accent { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
-  .sensor-contents {
-    font-size: 12px; color: var(--text);
-    margin-top: 4px;
-  }
   .sensor-notes {
     font-size: 11px; color: var(--text-muted);
     margin-top: 4px; line-height: 1.4;
