@@ -600,6 +600,17 @@ bool parseAxes12(const String& s) {
     else if (sg == '-') m[i].sign = -1;
     else return false;
   }
+  // Cada grupo (pose y gyro) tiene que ser una permutacion de los tres ejes
+  // fisicos: mapear dos DOF al mismo eje deja el equipo en un estado sin
+  // sentido, y se persiste en NVS y se comparte entre PCs. El wizard del
+  // cliente ya lo valida, pero es la unica defensa y el firmware es quien
+  // guarda el estado; un AXES SET a mano o un cliente viejo lo saltean.
+  for (int g = 0; g < 2; g++) {
+    uint8_t seen = 0;
+    for (int i = 0; i < 3; i++) seen |= (uint8_t)(1 << m[3*g + i].axis);
+    if (seen != 0x07) return false;
+  }
+
   axesConfig.pose_yaw   = m[0]; axesConfig.pose_pitch = m[1]; axesConfig.pose_roll = m[2];
   axesConfig.gyro_yaw   = m[3]; axesConfig.gyro_pitch = m[4]; axesConfig.gyro_roll = m[5];
   return true;
@@ -635,12 +646,18 @@ void loadAxes() {
     prefs.getBytes("axes", &axesConfig, sizeof(axesConfig));
     // Validar campos: axis ∈ {0,1,2}, sign ∈ {-1,+1}. Si está corrupto, default.
     AxisMapFW* arr = (AxisMapFW*)&axesConfig;
-    for (int i = 0; i < 6; i++) {
-      if (arr[i].axis > 2 || (arr[i].sign != 1 && arr[i].sign != -1)) {
-        axesConfig = AXES_DEFAULT;
-        break;
-      }
+    bool bad = false;
+    for (int i = 0; i < 6 && !bad; i++) {
+      if (arr[i].axis > 2 || (arr[i].sign != 1 && arr[i].sign != -1)) bad = true;
     }
+    // Ademas de campos validos, cada grupo debe ser permutacion de x/y/z.
+    // Cubre lo guardado por firmwares previos, que no lo verificaban.
+    for (int g = 0; g < 2 && !bad; g++) {
+      uint8_t seen = 0;
+      for (int i = 0; i < 3; i++) seen |= (uint8_t)(1 << arr[3*g + i].axis);
+      if (seen != 0x07) bad = true;
+    }
+    if (bad) axesConfig = AXES_DEFAULT;
   } else {
     axesConfig = AXES_DEFAULT;
   }
