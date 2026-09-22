@@ -44,6 +44,10 @@
 
 #define SERIAL_BAUD_RATE 460800
 
+// Timeout de lectura de comandos. Acota cuanto puede bloquear el loop un
+// comando incompleto; ver Serial.setTimeout() en setup().
+#define SERIAL_CMD_TIMEOUT_MS 20
+
 // Versión del firmware. Sincronizar con firmware/manifest.json cada vez que se
 // haga un release. El cliente la usa para chequear actualizaciones contra el
 // manifest del repo.
@@ -1252,6 +1256,13 @@ float icm20ReadTempC() {
 
 void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
+  // El default de Stream::setTimeout es 1000 ms. readStringUntil('\n') en el
+  // loop se dispara con Serial.available(), o sea con un solo byte en el
+  // buffer: un byte espurio sin terminador bloqueaba el loop un segundo
+  // entero (200 muestras perdidas). Los comandos son cortos y el host los
+  // manda completos, asi que 20 ms alcanzan de sobra incluso si el paquete
+  // USB llega fragmentado.
+  Serial.setTimeout(SERIAL_CMD_TIMEOUT_MS);
   delay(100);
   Serial.println("SimHit configure");
   // Banner de versión: el cliente lo captura como serial.firmwareVersionString
