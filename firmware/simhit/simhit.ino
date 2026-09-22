@@ -1254,6 +1254,47 @@ float icm20ReadTempC() {
 }
 #endif  // SENSOR_DRIVER == ICM_20948
 
+// Fallo de inicializacion del sensor: el firmware no puede hacer su trabajo,
+// pero quedarse en un while(1) mudo deja un dispositivo que enumera por USB y
+// no responde a nada. El cliente sondea con HELLO y se queda sin respuesta, y
+// el banner del fallo ya paso (el ESP32 hace autoreset al abrir el puerto, asi
+// que quien conecta despues nunca lo vio).
+//
+// En vez de eso: repetir el diagnostico cada DIAG_REPEAT_MS y seguir
+// respondiendo HELLO, VERSION y SENSOR, para que la app pueda identificar el
+// equipo y mostrar por que no arranca.
+void haltSensorFailure(const char* reason) {
+  const uint32_t DIAG_REPEAT_MS = 2000;
+  uint32_t lastMsg = 0;
+  for (;;) {
+    uint32_t now = millis();
+    if (now - lastMsg >= DIAG_REPEAT_MS) {
+      lastMsg = now;
+      Serial.print("SENSOR FAIL ");
+      Serial.print(reason);
+      Serial.print(" - firmware ");
+      Serial.print(FW_VERSION_STRING);
+      Serial.println(" detenido, revisar cableado I2C o driver compilado");
+    }
+    if (Serial.available()) {
+      String cmd = Serial.readStringUntil('\n');
+      cmd.trim();
+      if (cmd == "HELLO") {
+        Serial.println("HELLO");
+      } else if (cmd == "VERSION") {
+        Serial.print("VERSION ");
+        Serial.println(FW_VERSION_STRING);
+      } else if (cmd == "SENSOR") {
+        Serial.print("SENSOR FAIL ");
+        Serial.println(reason);
+      } else if (cmd == "RESET") {
+        ESP.restart();
+      }
+    }
+    delay(10);
+  }
+}
+
 void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
   // El default de Stream::setTimeout es 1000 ms. readStringUntil('\n') en el
@@ -1291,20 +1332,17 @@ void setup() {
 
   Serial.println("Initializing L3G4200D...");
   if (!l3gInit()) {
-    Serial.println("No L3G4200D detected");
-    while (1) delay(10);
+    haltSensorFailure("No L3G4200D detected");
   }
 
   Serial.println("Initializing LSM303 accel...");
   if (!accelSensor.begin()) {
-    Serial.println("No LSM303 accel detected");
-    while (1) delay(10);
+    haltSensorFailure("No LSM303 accel detected");
   }
 
   Serial.println("Initializing LSM303 mag...");
   if (!magSensor.begin()) {
-    Serial.println("No LSM303 mag detected");
-    while (1) delay(10);
+    haltSensorFailure("No LSM303 mag detected");
   }
   // Por defecto el LSM303 va a ±1.3 gauss; con offset hard-iron alto el eje Z
   // satura en -418 μT (0xF000 overflow). Subir el rango evita la saturación.
@@ -1321,8 +1359,7 @@ void setup() {
   }
   Serial.println("Initializing ICM-42688...");
   if (!icmInit()) {
-    Serial.println("No ICM-42688 detected");
-    while (1) delay(10);
+    haltSensorFailure("No ICM-42688 detected");
   }
 #elif SENSOR_DRIVER == MPU9250
   {
@@ -1333,8 +1370,7 @@ void setup() {
   }
   Serial.println("Initializing MPU-9250...");
   if (!mpuInit()) {
-    Serial.println("No MPU-9250 detected");
-    while (1) delay(10);
+    haltSensorFailure("No MPU-9250 detected");
   }
 #elif SENSOR_DRIVER == BNO055
   {
@@ -1345,8 +1381,7 @@ void setup() {
   }
   Serial.println("Initializing BNO055...");
   if (!bnoInit()) {
-    Serial.println("No BNO055 detected");
-    while (1) delay(10);
+    haltSensorFailure("No BNO055 detected");
   }
 #elif SENSOR_DRIVER == MPU_6050
   {
@@ -1357,8 +1392,7 @@ void setup() {
   }
   Serial.println("Initializing MPU-6050...");
   if (!mpu6050Init()) {
-    Serial.println("No MPU-6050 detected");
-    while (1) delay(10);
+    haltSensorFailure("No MPU-6050 detected");
   }
 #elif SENSOR_DRIVER == ITG_ADXL_HMC
   {
@@ -1369,8 +1403,7 @@ void setup() {
   }
   Serial.println("Initializing HW-579 (ITG-3205 + ADXL345 + HMC5883L)...");
   if (!itgAdxlHmcInit()) {
-    Serial.println("No HW-579 detected (revisar ITG y ADXL al menos)");
-    while (1) delay(10);
+    haltSensorFailure("No HW-579 detected (revisar ITG y ADXL al menos)");
   }
 #elif SENSOR_DRIVER == ICM_20948
   {
@@ -1383,8 +1416,7 @@ void setup() {
   }
   Serial.println("Initializing ICM-20948...");
   if (!icm20Init()) {
-    Serial.println("No ICM-20948 detected");
-    while (1) delay(10);
+    haltSensorFailure("No ICM-20948 detected");
   }
 #endif
 
