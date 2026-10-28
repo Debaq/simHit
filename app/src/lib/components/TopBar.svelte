@@ -654,6 +654,7 @@
   .nav { display: flex; gap: 4px; justify-content: center; }
   .nav a {
     text-decoration: none;
+    white-space: nowrap;
     padding: 6px 14px;
     border-radius: var(--radius-sm);
     color: var(--text-muted);

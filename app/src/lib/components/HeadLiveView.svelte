@@ -196,6 +196,17 @@
   let last = $derived(sim.lastImpulse);
   let verdict = $derived(sim.lastVerdict);
 
+  // Detectores que ya tienen su tile (valor + rango + pista): "¿Qué faltó?"
+  // solo lista el resto (pose inicial, overshoot, …) para no repetirlos.
+  const TILE_DETECTORS = new Set(['peak-velocity', 'amplitude', 'duration']);
+  let extraReasons = $derived.by<string[]>(() => {
+    if (!verdict) return [];
+    if (!verdict.detectorResults?.length) return verdict.reasons;
+    return verdict.detectorResults
+      .filter((r) => r.severity === 'fail' && !TILE_DETECTORS.has(r.id))
+      .map((r) => r.message);
+  });
+
   // helpers SVG (cálculos derivados de los ángulos)
   let yawScale = $derived(Math.cos((yaw * Math.PI) / 180));
   let yawAbsScaled = $derived(Math.max(0.35, Math.abs(yawScale)));
@@ -634,7 +645,7 @@
           </div>
         </div>
 
-        <div class="prom-tiles">
+        <div class="prom-tiles" style:--n={verdict.checks.length}>
           {#each verdict.checks as c (c.id)}
             {@const dec = c.id === 'amp' ? 1 : 0}
             {@const hint = c.ok
@@ -659,11 +670,11 @@
           {/each}
         </div>
 
-        {#if !verdict.ok && verdict.reasons.length > 0}
+        {#if !verdict.ok && extraReasons.length > 0}
           <div class="prom-why">
             <div class="prom-why-lab">¿Qué faltó?</div>
             <ul class="prom-why-list">
-              {#each verdict.reasons as r}
+              {#each extraReasons as r}
                 <li>{r}</li>
               {/each}
             </ul>
@@ -871,7 +882,7 @@
   .prom-sub { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
 
   .prom-tiles {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+    display: grid; grid-template-columns: repeat(var(--n, 4), 1fr); gap: 8px;
     margin-bottom: 8px;
     flex: 1 0 auto;
   }
@@ -899,7 +910,7 @@
   }
   .prom-tile-val {
     font-family: ui-monospace, monospace;
-    font-size: clamp(22px, 4vh, 44px); font-weight: 800; line-height: 1;
+    font-size: clamp(22px, 5vh, 80px); font-weight: 800; line-height: 1;
     grid-column: 1 / -1; grid-row: 2;
     align-self: center; text-align: center;
   }
@@ -944,6 +955,23 @@
 
   @media (max-width: 900px) {
     .prom-tiles { grid-template-columns: repeat(2, 1fr); }
+  }
+  /* Pantallas bajas (1366×768, 1600×900, 1080p al 125 %): la columna de la
+     tarjeta queda en ~150–250 px. Se compacta en vez de esconder los tiles. */
+  @media (max-height: 1000px) {
+    .impulse.prominent { padding: 6px 10px; }
+    .impulse.prominent .panel-title { margin-bottom: 4px; }
+    .prom-head { margin-bottom: 4px; gap: 8px; }
+    .prom-badge { width: 26px; height: 26px; font-size: 16px; }
+    .prom-title { font-size: 14px; }
+    .prom-sub { display: none; }
+    .prom-tiles { gap: 6px; margin-bottom: 6px; }
+    .prom-tile { padding: 4px 8px; }
+    .prom-tile-val { font-size: clamp(20px, 3.4vh, 44px); }
+    .prom-tile-hint { font-size: 12px; padding: 2px 6px; margin-top: 2px; }
+    .prom-why { padding: 4px 10px; }
+    .prom-why-lab { font-size: 12px; }
+    .prom-why-list li { font-size: 12px; padding: 3px 8px; }
   }
 
   .badge { padding: 1px 8px; border-radius: 999px; font-weight: 700; font-size: 11px; }

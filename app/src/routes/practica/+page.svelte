@@ -353,20 +353,21 @@
             impulseLayout="prominent"
             targetChannel={currentTarget ?? undefined}
           />
-          {#if banner || poseBanner}
+          <!-- Un banner a la vez: el de pose (consecuencia del último impulso)
+               reemplaza al de transición de plano. -->
+          {#if poseBanner}
             <div class="banners">
-              {#if banner}
-                <div class="plane-banner">
-                  <span class="plane-icon">🧭</span>
-                  <span class="plane-msg">{transitionMsg}</span>
-                </div>
-              {/if}
-              {#if poseBanner}
-                <div class="pose-banner">
-                  <span class="pose-icon">⚠</span>
-                  <span class="pose-msg">{poseBannerMsg}</span>
-                </div>
-              {/if}
+              <div class="pose-banner">
+                <span class="pose-icon">⚠</span>
+                <span class="pose-msg">{poseBannerMsg}</span>
+              </div>
+            </div>
+          {:else if banner}
+            <div class="banners">
+              <div class="plane-banner">
+                <span class="plane-icon">🧭</span>
+                <span class="plane-msg">{transitionMsg}</span>
+              </div>
             </div>
           {/if}
         </div>
@@ -737,16 +738,27 @@
     min-height: 0;
     position: relative;
   }
-  /* Banners flotando al pie de la tarjeta: como hermanos flex quedaban como
-     columna al lado de HeadLiveView y le quitaban ancho a diales y tiles. */
+  /* Banners flotando sobre la cabecera del panel de pose: como hermanos flex
+     quedaban como columna al lado de HeadLiveView y le quitaban ancho a
+     diales y tiles; al pie tapaban el resultado del impulso. El detalle de
+     la pose queda igual en "¿Qué faltó?". */
   .banners {
-    position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 2;
+    position: absolute; left: 10px; right: 10px; top: 10px; z-index: 2;
     display: flex; flex-direction: column; gap: 6px;
     pointer-events: none;
   }
-  .banners > * { margin-top: 0; box-shadow: 0 4px 14px rgb(0 0 0 / 0.25); }
+  .banners > * {
+    margin-top: 0; padding: 6px 12px; font-size: 13px;
+    box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
+  }
   .head-card :global(.live) { flex: 1; min-height: 0; }
   .head-card :global(.dial) { height: 130px; }
+  /* 1280×720 / 1366×768: más alto para la fila superior y diales más bajos,
+     para que la tarjeta del último impulso no quede en ~140 px. */
+  @media (max-height: 820px) {
+    .row.top { flex: 2; }
+    .head-card :global(.dial) { height: 100px; }
+  }
 
   .side { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: auto; }
 
