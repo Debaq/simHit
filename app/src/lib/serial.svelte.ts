@@ -541,8 +541,9 @@ class SerialStore {
    *  como referencia al recibir "IMU CAL done". */
   async recenterYaw() {
     this.pendingPoseBias = { pitch: this.posePitch, roll: this.poseRoll };
-    // Reset del flag para detectar el nuevo 'IMU CAL done' (ya era true).
-    this.calibrated = false;
+    // El llamador detecta el resultado en lastCalLine ("IMU CAL done|fail").
+    this.lastCalLine = '';
+    this.imuCalFailure = null;
     await this.sendCommand('IMU CAL');
   }
 
@@ -613,7 +614,10 @@ class SerialStore {
         this.poseBias = this.pendingPoseBias ?? { pitch: 0, roll: 0 };
         this.pendingPoseBias = null;
       } else if (line.startsWith('IMU CAL fail')) {
-        this.calibrated = false;
+        // `calibrated` no cambia: el firmware aborta antes de tocar bias y
+        // offsets, así que la calibración previa (si la había) sigue vigente.
+        // Antes se ponía en false y un solo recentrado fallido dejaba la UI
+        // pidiendo "¡Calibrar!" y la autocalibración desactivada.
         this.parseImuCalFailure(line);
         // El firmware no tocó los offsets: la referencia previa sigue válida.
         this.pendingPoseBias = null;

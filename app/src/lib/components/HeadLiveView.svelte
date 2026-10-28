@@ -234,9 +234,10 @@
   const COUNTDOWN_MS = 3000;
   const COOLDOWN_MS = 5000;
 
-  type AutoCalState = 'idle' | 'waiting' | 'countdown' | 'calibrating' | 'unmounted';
+  type AutoCalState = 'idle' | 'waiting' | 'countdown' | 'calibrating' | 'failed' | 'unmounted';
   let autoCalState = $state<AutoCalState>('idle');
   let autoCalRemaining = $state(0); // ms restantes del countdown
+  let autoCalFailMsg = $state('');
   let stableSince = 0;
   let countdownStartedAt = 0;
   let cooldownUntil = 0;
@@ -245,10 +246,24 @@
   let autoCalLabel = $derived.by(() => {
     if (autoCalState === 'countdown') return `QUIETO ${Math.ceil(autoCalRemaining / 1000)}`;
     if (autoCalState === 'calibrating') return 'CALIBRANDO…';
+    if (autoCalState === 'failed') return autoCalFailMsg;
     if (autoCalState === 'waiting') return 'MANTENER QUIETO';
     if (autoCalState === 'unmounted') return '¡Calibrar!';
     return '';
   });
+
+  /** Texto corto (cabe en el dial) para el último IMU CAL fallido. */
+  function autoCalFailText(): string {
+    const f = serial.imuCalFailure;
+    if (!f) return 'SIN RESPUESTA';
+    switch (f.reason) {
+      case 'preheat':
+        return f.remain_ms != null ? `CALENTANDO ${Math.ceil(f.remain_ms / 1000)} s` : 'CALENTANDO';
+      case 'motion': return 'SE MOVIÓ: REPETIR';
+      case 'accel_noise': return 'VIBRACIÓN: REPETIR';
+      default: return 'CAL FALLÓ';
+    }
+  }
 
   $effect(() => {
     const id = setInterval(() => {
@@ -268,12 +283,27 @@
         Math.abs(serial.gyroPitch) < STILL_THRESH &&
         Math.abs(serial.gyroRoll) < STILL_THRESH;
 
-      // Cooldown: silencio total hasta vencer.
+      if (autoCalState === 'calibrating') {
+        // Esperar la respuesta del firmware ("IMU CAL done|fail") o timeout.
+        const ll = serial.lastCalLine;
+        if (ll.startsWith('IMU CAL done')) {
+          cooldownUntil = now + COOLDOWN_MS;
+          autoCalState = 'idle';
+        } else if (ll.startsWith('IMU CAL fail') || now - calStartedAt > 6000) {
+          autoCalFailMsg = autoCalFailText();
+          cooldownUntil = now + COOLDOWN_MS;
+          autoCalState = 'failed';
+        }
+        return;
+      }
+
+      // Cooldown: silencio hasta vencer; un fallo queda visible mientras dura.
       if (now < cooldownUntil) {
-        if (autoCalState !== 'idle') autoCalState = 'idle';
+        if (autoCalState !== 'idle' && autoCalState !== 'failed') autoCalState = 'idle';
         stableSince = 0;
         return;
       }
+      if (autoCalState === 'failed') autoCalState = 'idle';
 
       // Si vuelve al verde, abortar todo silenciosamente.
       if (!yawNeedsCal || !serial.connected) {
@@ -285,7 +315,7 @@
       // Sin calibración manual previa: solo aviso estático, no auto-calibrar.
       // Requisito: el operador debe hacer una calibración manual inicial tras
       // conectar.
-      if (!serial.calibrated && autoCalState !== 'calibrating') {
+      if (!serial.calibrated) {
         autoCalState = 'unmounted';
         stableSince = 0;
         autoCalRemaining = 0;
@@ -297,15 +327,6 @@
         autoCalState = 'idle';
         stableSince = 0;
         autoCalRemaining = 0;
-        return;
-      }
-
-      if (autoCalState === 'calibrating') {
-        // Esperar a que el firmware responda (calibrated=true → done) o timeout.
-        if (serial.calibrated || now - calStartedAt > 4000) {
-          cooldownUntil = now + COOLDOWN_MS;
-          autoCalState = 'idle';
-        }
         return;
       }
 
@@ -482,6 +503,11 @@
             <g class="autocal">
               <rect x="-78" y="-22" width="156" height="28" rx="4" fill="#0ea5e9" />
               <text x="0" y="-2" text-anchor="middle" font-size="18" font-weight="800" fill="white">{autoCalLabel}</text>
+            </g>
+          {:else if autoCalState === 'failed'}
+            <g class="autocal">
+              <rect x="-86" y="-22" width="172" height="28" rx="4" fill="#d97706" />
+              <text x="0" y="-3" text-anchor="middle" font-size="14" font-weight="800" fill="white">{autoCalLabel}</text>
             </g>
           {:else if autoCalState === 'waiting'}
             <g class="autocal">
