@@ -38,6 +38,14 @@ function crc16Ccitt(s: string): number {
   return crc & 0xffff;
 }
 
+// Lleva un ángulo a (-180, 180]. El firmware des-envuelve los ángulos para que
+// las trazas sean continuas, así que tras varias vueltas (o sin CAL, con el yaw
+// de Madgwick en 0..360) la pose puede llegar como 268° o -291°.
+function wrap180(deg: number): number {
+  const w = ((deg + 180) % 360 + 360) % 360 - 180;
+  return w === -180 ? 180 : w;
+}
+
 export type FirmwareVersion = 'legacy' | 'extended' | 'unknown';
 
 // Sensor identificado por el firmware en el banner de boot. addr y whoami son
@@ -268,10 +276,18 @@ class SerialStore {
   private buffer = '';
   private bootResolve: (() => void) | null = null;
 
+  // IMU CAL pone en cero los tres ejes de pose. Cuando solo se quiere
+  // re-centrar el yaw (autocalibración con la cabeza ya en chin-down), el
+  // pitch/roll previos se conservan sumándolos aquí; si no, cada recentrado
+  // movería el cero del pitch y la app volvería a pedir -30° sobre lo ya
+  // flexionado. Una CAL manual (cabeza neutra) los vuelve a 0.
+  private poseBias = $state({ pitch: 0, roll: 0 });
+  private pendingPoseBias: { pitch: number; roll: number } | null = null;
+
   // Getters mapeados según axes
-  get poseYaw()   { const m = this.axes.pose.yaw;   return this.angle[m.axis] * m.sign; }
-  get posePitch() { const m = this.axes.pose.pitch; return this.angle[m.axis] * m.sign; }
-  get poseRoll()  { const m = this.axes.pose.roll;  return this.angle[m.axis] * m.sign; }
+  get poseYaw()   { const m = this.axes.pose.yaw;   return wrap180(this.angle[m.axis] * m.sign); }
+  get posePitch() { const m = this.axes.pose.pitch; return wrap180(this.angle[m.axis] * m.sign + this.poseBias.pitch); }
+  get poseRoll()  { const m = this.axes.pose.roll;  return wrap180(this.angle[m.axis] * m.sign + this.poseBias.roll); }
   get gyroYaw()   { const m = this.axes.gyro.yaw;   return this.gyro[m.axis] * m.sign; }
   get gyroPitch() { const m = this.axes.gyro.pitch; return this.gyro[m.axis] * m.sign; }
   get gyroRoll()  { const m = this.axes.gyro.roll;  return this.gyro[m.axis] * m.sign; }
@@ -445,6 +461,7 @@ class SerialStore {
     this.connecting = true;
     this.lastError = null;
     this.calibrated = false;
+    this.resetPoseBias();
     this.firmwareVersion = 'unknown';
     this.crcErrors = 0;
     this.detectedSensor = null;
@@ -501,6 +518,7 @@ class SerialStore {
     this.portPath = null;
     this.buffer = '';
     this.calibrated = false;
+    this.resetPoseBias();
     this.detectedSensor = null;
     this.firmwareVersionString = null;
     this.espMacAddress = null;
@@ -517,6 +535,20 @@ class SerialStore {
     } catch (e) {
       this.lastError = String(e);
     }
+  }
+
+  /** IMU CAL que solo re-centra el yaw: el pitch/roll actuales se mantienen
+   *  como referencia al recibir "IMU CAL done". */
+  async recenterYaw() {
+    this.pendingPoseBias = { pitch: this.posePitch, roll: this.poseRoll };
+    // Reset del flag para detectar el nuevo 'IMU CAL done' (ya era true).
+    this.calibrated = false;
+    await this.sendCommand('IMU CAL');
+  }
+
+  private resetPoseBias() {
+    this.poseBias = { pitch: 0, roll: 0 };
+    this.pendingPoseBias = null;
   }
 
   private waitForBoot(): Promise<void> {
@@ -578,9 +610,13 @@ class SerialStore {
       if (line.startsWith('IMU CAL done')) {
         this.calibrated = true;
         this.imuCalFailure = null;
+        this.poseBias = this.pendingPoseBias ?? { pitch: 0, roll: 0 };
+        this.pendingPoseBias = null;
       } else if (line.startsWith('IMU CAL fail')) {
         this.calibrated = false;
         this.parseImuCalFailure(line);
+        // El firmware no tocó los offsets: la referencia previa sigue válida.
+        this.pendingPoseBias = null;
       }
       // Capturar todas las líneas de MAG CAL para diagnóstico.
       if (line.startsWith('MAG CAL ')) {
@@ -643,6 +679,8 @@ class SerialStore {
         line.startsWith('Accel filter') ||
         line.startsWith('IMU STATUS') || line.startsWith('MAG STATUS') ||
         line.startsWith('IMU CLR') || line.startsWith('MAG CLR') || line === 'HELLO') {
+      // IMU CLR borra los offsets de pose en el firmware.
+      if (line.startsWith('IMU CLR')) this.resetPoseBias();
       return;
     }
     if (line.startsWith('FILTER ')) {

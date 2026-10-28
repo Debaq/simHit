@@ -271,15 +271,21 @@
         return;
       }
 
-      // Sin calibración manual previa, o equipo no montado en cabeza:
-      // solo aviso estático, no auto-calibrar. Requisito: el operador debe
-      // hacer una calibración manual inicial tras conectar.
-      if (!serial.calibrated || !headMounted) {
-        if (autoCalState !== 'calibrating') {
-          autoCalState = 'unmounted';
-          stableSince = 0;
-          autoCalRemaining = 0;
-        }
+      // Sin calibración manual previa: solo aviso estático, no auto-calibrar.
+      // Requisito: el operador debe hacer una calibración manual inicial tras
+      // conectar.
+      if (!serial.calibrated && autoCalState !== 'calibrating') {
+        autoCalState = 'unmounted';
+        stableSince = 0;
+        autoCalRemaining = 0;
+        return;
+      }
+      // Calibrado pero con pitch/roll lejos del objetivo: no es falta de
+      // calibración sino de pose; el chip "Corregir" ya guía al alumno.
+      if (serial.calibrated && !headMounted) {
+        autoCalState = 'idle';
+        stableSince = 0;
+        autoCalRemaining = 0;
         return;
       }
 
@@ -304,9 +310,8 @@
         if (autoCalRemaining <= 0) {
           autoCalState = 'calibrating';
           calStartedAt = now;
-          // Reset flag para detectar el nuevo 'IMU CAL done' (ya era true).
-          serial.calibrated = false;
-          serial.sendCommand('IMU CAL').catch(() => {
+          // Solo yaw: conservar el chin-down actual como referencia de pitch.
+          serial.recenterYaw().catch(() => {
             cooldownUntil = performance.now() + COOLDOWN_MS;
             autoCalState = 'idle';
           });
@@ -556,10 +561,21 @@
           <text x="94"  y="3" font-size="11" fill="var(--text-muted)">F</text>
           <text x="-98" y="3" font-size="11" fill="var(--text-muted)">A</text>
           {#if Math.abs(pitch - activePitchTarget) > PITCH_WARN}
-            <g class="calibra">
-              <rect x="-70" y="-15" width="140" height="28" rx="4" fill="var(--danger)" />
-              <text x="0" y="5" text-anchor="middle" font-size="20" font-weight="900" fill="white">¡Calibrar!</text>
-            </g>
+            {#if activePitchTarget !== 0}
+              <!-- Con objetivo chin-down, estar lejos del verde es falta de
+                   pose, no de calibración (la CAL se hace con cabeza neutra). -->
+              <g class="calibra">
+                <rect x="-80" y="-15" width="160" height="28" rx="4" fill="var(--danger)" />
+                <text x="0" y="5" text-anchor="middle" font-size="16" font-weight="900" fill="white">
+                  {pitch > activePitchTarget ? 'Baja la barbilla' : 'Sube la barbilla'}
+                </text>
+              </g>
+            {:else}
+              <g class="calibra">
+                <rect x="-70" y="-15" width="140" height="28" rx="4" fill="var(--danger)" />
+                <text x="0" y="5" text-anchor="middle" font-size="20" font-weight="900" fill="white">¡Calibrar!</text>
+              </g>
+            {/if}
           {/if}
         </svg>
         <div class="view-cap">pitch</div>
@@ -824,6 +840,9 @@
     padding: 10px 12px; border-width: 2px;
     flex: 1; min-height: 0;
     display: flex; flex-direction: column;
+    /* Si la columna es baja, scroll vertical en vez de comprimir los tiles
+       y montar "¿Qué faltó?" sobre los valores. */
+    overflow-y: auto;
   }
   .impulse.prominent.ok { background: #ecfdf5; }
   .impulse.prominent.bad { background: #fef2f2; }
@@ -854,7 +873,7 @@
   .prom-tiles {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
     margin-bottom: 8px;
-    flex: 1; min-height: 0;
+    flex: 1 0 auto;
   }
   .prom-tile {
     padding: 8px 10px;
@@ -866,7 +885,6 @@
     grid-template-rows: auto 1fr auto;
     column-gap: 6px;
     align-items: center;
-    min-height: 0;
   }
   .prom-tile.ok { border-color: var(--success); }
   .prom-tile.bad { border-color: var(--danger); }
@@ -903,8 +921,8 @@
   .prom-why {
     padding: 6px 12px; background: var(--surface);
     border: 2px solid var(--danger); border-radius: var(--radius-sm);
-    display: flex; align-items: center; gap: 12px; flex-wrap: nowrap;
-    overflow-x: auto;
+    display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap;
+    flex-shrink: 0;
   }
   .prom-why-lab {
     font-size: 16px; text-transform: uppercase; letter-spacing: .04em;
@@ -922,7 +940,6 @@
     padding: 4px 10px;
     background: #fee2e2;
     border-radius: 999px;
-    white-space: nowrap;
   }
 
   @media (max-width: 900px) {

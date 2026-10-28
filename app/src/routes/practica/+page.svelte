@@ -353,16 +353,20 @@
             impulseLayout="prominent"
             targetChannel={currentTarget ?? undefined}
           />
-          {#if banner}
-            <div class="plane-banner">
-              <span class="plane-icon">🧭</span>
-              <span class="plane-msg">{transitionMsg}</span>
-            </div>
-          {/if}
-          {#if poseBanner}
-            <div class="pose-banner">
-              <span class="pose-icon">⚠</span>
-              <span class="pose-msg">{poseBannerMsg}</span>
+          {#if banner || poseBanner}
+            <div class="banners">
+              {#if banner}
+                <div class="plane-banner">
+                  <span class="plane-icon">🧭</span>
+                  <span class="plane-msg">{transitionMsg}</span>
+                </div>
+              {/if}
+              {#if poseBanner}
+                <div class="pose-banner">
+                  <span class="pose-icon">⚠</span>
+                  <span class="pose-msg">{poseBannerMsg}</span>
+                </div>
+              {/if}
             </div>
           {/if}
         </div>
@@ -731,7 +735,16 @@
     overflow: hidden;
     display: flex;
     min-height: 0;
+    position: relative;
   }
+  /* Banners flotando al pie de la tarjeta: como hermanos flex quedaban como
+     columna al lado de HeadLiveView y le quitaban ancho a diales y tiles. */
+  .banners {
+    position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 2;
+    display: flex; flex-direction: column; gap: 6px;
+    pointer-events: none;
+  }
+  .banners > * { margin-top: 0; box-shadow: 0 4px 14px rgb(0 0 0 / 0.25); }
   .head-card :global(.live) { flex: 1; min-height: 0; }
   .head-card :global(.dial) { height: 130px; }
 
